@@ -1,14 +1,14 @@
-/* Paste the Firebase web app config here to turn on shared live data.
-   Leave firebase as null and the site runs in single-device mode (data stays in this browser).
+/* Firebase web app config: turns on shared live data.
+   Set firebase to null and the site runs in single-device mode (data stays in this browser).
    These values are not secret: access is controlled by the database rules in database.rules.json. */
 window.LADDER_CONFIG = {
-  firebase: null,
-  /* Example:
   firebase: {
-    apiKey: "...",
-    authDomain: "your-project.firebaseapp.com",
-    databaseURL: "https://your-project-default-rtdb.firebaseio.com",
-    projectId: "your-project",
-    appId: "...",
-  }, */
+    apiKey: "AIzaSyBPd9hXvfXTefF2Q5Nv0rYctobTCcQfkV4",
+    authDomain: "ladder-league-7c5db.firebaseapp.com",
+    databaseURL: "https://ladder-league-7c5db-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "ladder-league-7c5db",
+    storageBucket: "ladder-league-7c5db.firebasestorage.app",
+    messagingSenderId: "404673449762",
+    appId: "1:404673449762:web:7f0a9bce839273963e5f7b",
+  },
 };
