@@ -10,6 +10,7 @@ const app = {
   st: null, urls: [], online: true,
   be: null,          // the backend: firebase, server or local (see backend.js)
   importDoc: null,   // league file chosen for import, waiting for confirmation
+  short: {},         // player id -> "First L", rebuilt whenever the roster changes
   flow: null,        // score entry overlay
   sel: null,         // player picked up for a move (organiser)
   confirm: null,     // key of the action waiting for a second tap
@@ -25,7 +26,22 @@ async function send(type, args = {}) {
   return app.be.send(type, args);
 }
 const isOrg = () => !!app.be && app.be.isOrg();
-function accept(j) { app.st = j.state; app.urls = j.urls || []; render(); }
+function accept(j) { app.st = j.state; app.urls = j.urls || []; app.short = shortNames(j.state.players); render(); }
+/* "Joel Carr" -> "Joel C". Two players who would collide get more of the surname: "Matt Gi", "Matt Gr". */
+function shortNames(players) {
+  const cap = w => (w ? w[0].toUpperCase() + w.slice(1) : w), rows = Object.values(players).map(p => {
+    const parts = p.name.trim().split(/\s+/);
+    return { id: p.id, first: cap(parts[0]), last: parts.length > 1 ? cap(parts[parts.length - 1]) : "" };
+  });
+  const out = {};
+  for (const r of rows) {
+    const same = rows.filter(o => o !== r && o.first.toLowerCase() === r.first.toLowerCase());
+    let k = 1;
+    while (k < r.last.length && same.some(o => o.last.slice(0, k).toLowerCase() === r.last.slice(0, k).toLowerCase())) k++;
+    out[r.id] = r.last ? `${r.first} ${r.last.slice(0, k)}` : r.first;
+  }
+  return out;
+}
 function setOnline(on) { if (app.online !== on) { app.online = on; render(); } }
 async function boot() {
   app.be = await Backends.pick(accept, setOnline);
@@ -47,13 +63,14 @@ async function act(area, type, args, okMsg) {
 /* ---------- selectors ---------- */
 const P = id => app.st.players[id] || { name: "?", seed: 0, active: false };
 const nm = id => P(id).name;
+const sn = id => (app.st.league.nameStyle === "full" ? nm(id) : app.short[id] || nm(id));   // name as shown on match screens
 const rating = id => app.st.ratings.current[id] ?? P(id).seed;
 const openSess = () => app.st.sessions.find(s => s.status !== "closed");
 const closedSess = () => app.st.sessions.filter(s => s.status === "closed").sort((a, b) => (a.date + a.id < b.date + b.id ? -1 : 1));
 const sessById = id => app.st.sessions.find(s => s.id === id);
 const poolGames = (s, pool) => (pool.rounds || []).flat().map(id => s.games[id]);
-const team = ids => ids.map(id => `<span>${esc(nm(id))}</span>`).join("");
-const teamLine = ids => ids.map(nm).map(esc).join(" / ");
+const team = ids => ids.map(id => `<span>${esc(sn(id))}</span>`).join("");
+const teamLine = ids => ids.map(sn).map(esc).join(" / ");
 const niceDate = d => new Date(d + "T00:00").toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
 const shortDate = d => new Date(d + "T00:00").toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 
@@ -116,11 +133,21 @@ function roundCards(s, pool, r) {
     return matchCard(s, g, { label });
   }).join("");
 }
-function confirmBlock(s, pool, r) {
+function confirmBlock(s, pool, r, brief) {
   if (r.finished) return "";
   const label = r.at + 1 < r.total ? `Confirm scores and start round ${r.at + 2}` : "Confirm scores and finish";
   return r.ready ? `<button class="btn huge primary" data-act="confirmRound" data-sid="${s.id}" data-pool="${pool.id}" data-round="${r.at}">${label}</button>`
-    : `<p class="hint">${r.waiting === 1 ? "One score to go." : `${r.waiting} scores to go.`} Scores stay here until the round is confirmed.</p>`;
+    : `<p class="hint">${r.waiting === 1 ? "One score to go" : `${r.waiting} scores to go`}${brief ? "" : ". Scores stay here until the round is confirmed."}</p>`;
+}
+/* The round after this one, in one box: who plays whom, in order, and who sits out. */
+function nextBox(pool, r, compact) {
+  if (!r.next.length) return "";
+  return `<section class="nextbox ${compact ? "compact" : ""}">
+    <h2><span>Next round</span>${compact ? "" : `<span class="num">Round ${r.at + 2} of ${r.total}</span>`}</h2>
+    ${r.next.map((g, i) => `<div class="nx"><span class="nx-tag">${pool.courts > 1 ? "Court " + (i + 1) : i === 0 ? "First on court" : "Then"}</span>
+      ${compact ? `<div class="nx-lines"><b>${teamLine(g.t1)}</b><b><i>v</i> ${teamLine(g.t2)}</b></div>`
+        : `<div class="nx-teams"><div class="names">${team(g.t1)}</div><span class="v">v</span><div class="names r">${team(g.t2)}</div></div>`}</div>`).join("")}
+    ${r.sittingNext.length ? `<p class="sit"><b>Sitting out</b> ${namesList(r.sittingNext)}</p>` : ""}</section>`;
 }
 /* Organiser only: step a pool back a round after a confirm made too early. */
 function backBlock(s, pool, r) {
@@ -130,12 +157,12 @@ function backBlock(s, pool, r) {
     ? `<div class="row orgrow"><span class="muted">Go back to round ${r.at}? Scores are kept.</span><button class="btn small" data-act="backRound" data-sid="${s.id}" data-pool="${pool.id}">Yes, go back</button><button class="btn small" data-act="cancel">No</button></div>`
     : `<div class="row orgrow"><button class="btn small" data-act="ask" data-key="${key}">Organiser: back to round ${r.at}</button></div>`;
 }
-const namesList = ids => ids.map(nm).map(esc).join(", ");
+const namesList = ids => ids.map(sn).map(esc).join(", ");
 function standingsTable(s, pool) {
   const rows = poolTable(s, pool);
   return `<div class="scroll"><table>
     <thead><tr><th>#</th><th>Player</th><th class="r">W</th><th class="r">L</th><th class="r">PF</th><th class="r">PA</th><th class="r">+/-</th></tr></thead>
-    <tbody>${rows.map((r, i) => `<tr><td>${i + 1}</td><td>${esc(nm(r.p))}</td><td class="r">${r.w}</td><td class="r">${r.l}</td><td class="r">${r.pf}</td><td class="r">${r.pa}</td><td class="r">${r.pf - r.pa > 0 ? "+" : ""}${r.pf - r.pa}</td></tr>`).join("")}</tbody>
+    <tbody>${rows.map((r, i) => `<tr><td>${i + 1}</td><td>${esc(sn(r.p))}</td><td class="r">${r.w}</td><td class="r">${r.l}</td><td class="r">${r.pf}</td><td class="r">${r.pa}</td><td class="r">${r.pf - r.pa > 0 ? "+" : ""}${r.pf - r.pa}</td></tr>`).join("")}</tbody>
   </table></div>`;
 }
 function resultRows(s, pool, canEdit, upto) {
@@ -166,14 +193,14 @@ function viewHome() {
       ${pools.length ? `<div class="pools">${pools.map(p => `<div class="pool"><h2>${esc(p.name)}</h2><ol>${p.players.map((id, i) => `<li class="pl"><span class="rk">${i + 1}</span><span class="nm">${esc(nm(id))}</span><span class="rt">${fmt(rating(id))}</span></li>`).join("")}</ol></div>`).join("")}</div>` : ""}
       ${join}`;
   }
-  return `<div class="head"><h1>${niceDate(s.date)}</h1><p class="muted">Tap your pool to see who is on court and enter scores.</p></div>
+  return `<div class="head"><h1>${niceDate(s.date)}</h1></div>
     <div class="tiles">${s.pools.map(p => {
       const r = roundInfo(s, p), waiting = r.games.filter(g => g.status === "pending");
       return `<a class="tile ${r.finished ? "done" : ""}" href="#/court/${p.id}">
         <span class="t-name">${esc(p.name)}</span>
         <span class="t-sub">${r.finished ? "Finished" : `Round ${r.at + 1} of ${r.total}`} · ${r.done} of ${r.playable} games</span>
         <span class="bar"><i style="width:${pct(r)}%"></i></span>
-        <span class="t-now">${r.finished ? "All rounds played" : waiting.length ? waiting.map(g => `<span>${teamLine(g.t1)} <i>v</i> ${teamLine(g.t2)}</span>`).join("") : "Scores are in. Waiting for the round to be confirmed."}</span>
+        <span class="t-now">${r.finished ? "All rounds played" : waiting.length ? waiting.map(g => `<span>${teamLine(g.t1)}<br><i>v</i> ${teamLine(g.t2)}</span>`).join("") : "Scores are in. Waiting for the round to be confirmed."}</span>
       </a>`;
     }).join("")}</div>
     <div class="row"><a class="btn" href="#/board">All courts on one screen</a><a class="btn" href="#/standings">Standings</a></div>${join}`;
@@ -186,15 +213,12 @@ function viewCourt(pid) {
   const r = roundInfo(s, pool);
   return `<div class="court"><a class="back" href="#/">‹ All pools</a>
     <div class="head"><div class="row spread"><h1>${esc(pool.name)}</h1><span class="round">${r.finished ? "Finished" : `Round ${r.at + 1} of ${r.total}`}</span></div>
-      <span class="bar on-surface"><i style="width:${pct(r)}%"></i></span>
-      <p class="muted">${r.done} of ${r.playable} games played</p></div>
+      <span class="bar on-surface"><i style="width:${pct(r)}%"></i></span></div>
     ${r.finished ? '<div class="note"><b>All rounds finished.</b> Thanks for playing. Final standings are below.</div>' + backBlock(s, pool, r) : `
       <section class="stack">${roundCards(s, pool, r)}
         ${r.sitting.length ? `<p class="sit"><b>Sitting out</b> ${namesList(r.sitting)}</p>` : ""}
         ${errLine("court")}${confirmBlock(s, pool, r)}${backBlock(s, pool, r)}</section>`}
-    ${r.next.length ? `<section class="stack"><h2 class="sub">Next: round ${r.at + 2}</h2>
-        ${r.next.map(g => matchCard(s, g, { preview: true })).join("")}
-        ${r.sittingNext.length ? `<p class="sit"><b>Sitting out</b> ${namesList(r.sittingNext)}</p>` : ""}</section>` : ""}
+    ${nextBox(pool, r)}
     ${r.at > 0 ? `<div class="card"><h2>Earlier rounds</h2>${resultRows(s, pool, true, r.at)}</div>` : ""}
     <div class="card"><h2>${esc(pool.name)} standings</h2>${standingsTable(s, pool)}</div></div>`;
 }
@@ -203,14 +227,14 @@ function viewCourt(pid) {
 function viewBoard() {
   const s = openSess();
   if (!s || s.status !== "live") return `<div class="head"><h1>All courts</h1><p class="muted">No session is live. Current games appear here once the organiser starts one.</p></div>`;
-  return `<div class="head"><h1>All courts</h1><p class="muted">${niceDate(s.date)}. Tap a game to enter its score.</p></div>${errLine("court")}
+  return `<div class="head"><h1>All courts</h1></div>${errLine("court")}
     <div class="board">${s.pools.map(p => {
       const r = roundInfo(s, p);
       return `<div class="stack">
         <div class="row spread"><h2><a href="#/court/${p.id}">${esc(p.name)}</a></h2><span class="round">${r.finished ? "Finished" : `Round ${r.at + 1} of ${r.total}`}</span></div>
         <span class="bar on-surface"><i style="width:${pct(r)}%"></i></span>
-        ${r.finished ? '<div class="note">All rounds finished.</div>' : roundCards(s, p, r) + confirmBlock(s, p, r)}${backBlock(s, p, r)}
-        ${r.next.length ? `<div class="nextlist"><b>Next round</b>${r.next.map(g => `<span>${teamLine(g.t1)} <i>v</i> ${teamLine(g.t2)}</span>`).join("")}</div>` : ""}
+        ${r.finished ? '<div class="note">All rounds finished.</div>' : roundCards(s, p, r) + confirmBlock(s, p, r, true)}${backBlock(s, p, r)}
+        ${nextBox(p, r, true)}
       </div>`;
     }).join("")}</div>`;
 }
@@ -406,7 +430,9 @@ function orgSettings() {
   return `<form class="card" data-form="league"><h2>League</h2>
       <div class="row" style="align-items:flex-end"><label class="field">League name<input id="lname" type="text" value="${esc(app.form.lname ?? lg.name)}"></label>
       <label class="field">Points to win a game<input id="lpts" type="number" min="5" max="21" value="${esc(app.form.lpts ?? lg.pointsToWin)}"></label>
-      <button class="btn primary" type="submit">Save</button></div>${errLine("league")}</form>
+      <button class="btn primary" type="submit">Save</button></div>${errLine("league")}
+      <div class="row spread"><span><b>Names on match screens</b><br><span class="muted">Standings and the roster always show full names.</span></span>
+        <span class="seg" role="group" aria-label="Names on match screens">${[["short", "First name + initial"], ["full", "Full names"]].map(([k, l]) => `<button type="button" data-act="nameStyle" data-style="${k}" aria-pressed="${(lg.nameStyle || "short") === k}">${l}</button>`).join("")}</span></div></form>
     <div class="card"><h2>Connecting</h2>
       ${app.be.kind === "firebase" ? `<p>Everyone opens <b>${esc(location.origin + location.pathname)}</b>. Scores sync live between all phones and tablets.</p>`
         : app.be.kind === "server" ? `<p>${app.urls.length ? `Phones and tablets on the same Wi-Fi or hotspot open <b>${esc(app.urls[0])}</b>.` : "This computer has no network address right now. Connect it to Wi-Fi or a phone hotspot so other devices can join."}</p>
@@ -442,17 +468,20 @@ function viewFlow() {
       <button class="pick" data-act="fwin" data-win="2">${team(g.t2)}</button></div>
       ${g.status === "done" ? `<button class="btn danger" data-act="fclear">Clear this score</button>` : ""}`;
   } else if (f.step === "score") {
-    body = `<h2>What did the other pair score?</h2><p class="muted"><b>${teamLine(losers)}</b> lost to ${teamLine(winners)}, who scored ${pts}.</p>
+    body = `<h2>Tap the <span class="hl">losing</span> score</h2>
+      <div class="match is-done slim"><div class="side won"><div class="names"><em>Won</em>${team(winners)}</div><div class="pts">${pts}</div></div>
+        <div class="side lost"><div class="names"><em>Lost</em>${team(losers)}</div><div class="pts ask">?</div></div></div>
+      <p class="lead">First to ${pts}, win by 1. What did <b>${teamLine(losers)}</b> finish on?</p>
       <div class="keys">${Array.from({ length: pts }, (_, i) => `<button class="key" data-act="fscore" data-ls="${i}">${i}</button>`).join("")}
-        <button class="key other" data-act="fother">Other</button></div>`;
+        <button class="key other" data-act="fother">Other score</button></div>`;
   } else if (f.step === "other") {
     const stepper = (label, key, v) => `<div class="step"><b>${label}</b><button class="key" data-act="fstep" data-key="${key}" data-d="-1" aria-label="Less">−</button><span class="val">${v}</span><button class="key" data-act="fstep" data-key="${key}" data-d="1" aria-label="More">+</button></div>`;
     body = `<h2>Set the score</h2>${stepper(teamLine(winners) + " (won)", "ws", f.ws)}${stepper(teamLine(losers), "ls", f.ls)}
       <button class="btn huge primary" data-act="fconfirm" ${f.ws > f.ls ? "" : "disabled"}>Continue</button>`;
   } else {
     body = `<h2>Save this score?</h2>
-      <div class="match is-done"><div class="side won"><div class="names">${team(winners)}</div><div class="pts">${f.ws}</div></div>
-        <div class="side lost"><div class="names">${team(losers)}</div><div class="pts">${f.ls}</div></div></div>
+      <div class="match is-done"><div class="side won"><div class="names"><em>Won</em>${team(winners)}</div><div class="pts">${f.ws}</div></div>
+        <div class="side lost"><div class="names"><em>Lost</em>${team(losers)}</div><div class="pts">${f.ls}</div></div></div>
       ${f.clash ? `<p class="err" role="alert">This game was already entered as ${teamLine(g.t1)} ${f.clash.s1} – ${f.clash.s2} ${teamLine(g.t2)}. Replace it?</p>
         <button class="btn huge primary" data-act="fsave" data-replace="1" ${f.busy ? "disabled" : ""}>Replace the score</button><button class="btn" data-act="fclose">Keep ${f.clash.s1} – ${f.clash.s2}</button>`
         : `<button class="btn huge primary" data-act="fsave" ${f.busy ? "disabled" : ""}>${f.busy ? "Saving…" : "Save score"}</button>`}`;
@@ -508,6 +537,7 @@ const A = {
   },
   confirmRound: d => act("court", "round.confirm", { sid: d.sid, pool: d.pool, round: +d.round }, "Round confirmed"),
   backRound: d => { app.confirm = null; return act("court", "round.back", { sid: d.sid, pool: d.pool }, "Back one round"); },
+  nameStyle: d => act("league", "league.update", { nameStyle: d.style }),
   tab: d => { app.tab = d.tab; render(); },
   lock: async () => { await app.be.signOut(); app.form.password = ""; render(); },
   export: () => {

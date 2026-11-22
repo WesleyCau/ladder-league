@@ -224,7 +224,7 @@
   const fail = (code, message, extra) => { throw new ActionError(code, message, extra); };
 
   function emptyState(name) {
-    return { version: 1, seq: { p: 0, s: 0, g: 0 }, league: { name: name || "Doubles Ladder League", seeds: DEFAULT_SEEDS.slice(), poolSize: 8, pointsToWin: 11 },
+    return { version: 1, seq: { p: 0, s: 0, g: 0 }, league: { name: name || "Doubles Ladder League", seeds: DEFAULT_SEEDS.slice(), poolSize: 8, pointsToWin: 11, nameStyle: "short" },
       players: {}, sessions: [], ratings: { current: {}, sessions: {}, games: {}, totals: {} } };
   }
   const toArray = x => (Array.isArray(x) ? x.filter(v => v != null) : x && typeof x === "object" ? Object.keys(x).sort((a, b) => a - b).map(k => x[k]) : []);
@@ -285,6 +285,7 @@
 
   H["league.update"] = (st, a) => {
     if ("name" in a) { const name = String(a.name).trim(); if (!name) fail("invalid", "League name cannot be empty."); st.league.name = name.slice(0, 80); }
+    if ("nameStyle" in a) { if (a.nameStyle !== "short" && a.nameStyle !== "full") fail("invalid", "Choose short or full names."); st.league.nameStyle = a.nameStyle; }
     if ("pointsToWin" in a) { const pts = parseInt(a.pointsToWin, 10); if (!(pts >= 5 && pts <= 21)) fail("invalid", "Points to win must be between 5 and 21."); st.league.pointsToWin = pts; }
   };
   H["player.add"] = (st, a) => {

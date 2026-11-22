@@ -110,6 +110,10 @@ class Store:
             if not name:
                 raise ActionError("invalid", "League name cannot be empty.")
             lg["name"] = name[:80]
+        if "nameStyle" in a:
+            if a["nameStyle"] not in ("short", "full"):
+                raise ActionError("invalid", "Choose short or full names.")
+            lg["nameStyle"] = a["nameStyle"]
         if "pointsToWin" in a:
             pts = int(a["pointsToWin"])
             if not 5 <= pts <= 21:
