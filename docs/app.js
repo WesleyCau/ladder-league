@@ -120,7 +120,7 @@ function matchCard(s, g, opts = {}) {
   const done = g.status === "done", skipped = g.status === "skipped";
   const side = (ids, pts, won) => `<div class="side ${done ? (won ? "won" : "lost") : ""}"><div class="names">${team(ids)}</div>${opts.preview ? "" : `<div class="pts">${done ? pts : ""}</div>`}</div>`;
   const button = opts.preview ? "" : skipped ? '<p class="muted">Marked as not played.</p>'
-    : `<button class="btn ${done ? "" : "huge primary"}" data-act="flow" data-sid="${s.id}" data-gid="${g.id}">${done ? "Change this score" : "Enter score"}</button>`;
+    : `<button class="btn huge ${done ? "quiet" : "primary"}" data-act="flow" data-sid="${s.id}" data-gid="${g.id}">${done ? "Change score" : "Enter score"}</button>`;
   return `<div class="match ${done ? "is-done" : skipped ? "is-skipped" : opts.preview ? "is-preview" : "is-live"}">
     ${opts.label ? `<span class="tag">${opts.label}</span>` : ""}
     ${side(g.t1, g.s1, g.s1 > g.s2)}${side(g.t2, g.s2, g.s2 > g.s1)}${button}</div>`;
@@ -133,11 +133,12 @@ function roundCards(s, pool, r) {
     return matchCard(s, g, { label });
   }).join("");
 }
+/* One slot under a round's games: either how many scores are missing, or the confirm button. Same size either way. */
 function confirmBlock(s, pool, r, brief) {
   if (r.finished) return "";
-  const label = r.at + 1 < r.total ? `Confirm scores and start round ${r.at + 2}` : "Confirm scores and finish";
-  return r.ready ? `<button class="btn huge primary" data-act="confirmRound" data-sid="${s.id}" data-pool="${pool.id}" data-round="${r.at}">${label}</button>`
-    : `<p class="hint">${r.waiting === 1 ? "One score to go" : `${r.waiting} scores to go`}${brief ? "" : ". Scores stay here until the round is confirmed."}</p>`;
+  const label = r.at + 1 < r.total ? `Confirm and start ${brief ? "R" : "round "}${r.at + 2}` : "Confirm and finish";
+  return r.ready ? `<button class="slot go" data-act="confirmRound" data-sid="${s.id}" data-pool="${pool.id}" data-round="${r.at}">${label}</button>`
+    : `<div class="slot wait">${r.waiting === 1 ? "1 score to go" : `${r.waiting} scores to go`}</div>`;
 }
 /* The round after this one, in one box: who plays whom, in order, and who sits out. */
 function nextBox(pool, r, compact) {

@@ -56,6 +56,13 @@ main { max-width: 1400px; margin: 0 auto; padding: 12px 12px 18px; display: flex
 .err { color: var(--bad); font-weight: 650; }
 .hint { color: var(--muted); text-align: center; padding: 2px 0; }
 .orgrow { justify-content: center; }
+/* the slot under a round: "2 scores to go" and the confirm button share one box shape */
+.slot { width: 100%; min-height: 64px; border-radius: 16px; padding: 8px 12px; display: flex; align-items: center; justify-content: center; text-align: center; font: inherit; font-size: 22px; font-weight: 750; line-height: 1.15; white-space: nowrap; }
+.slot.wait { border: 2px dashed var(--line-2); color: var(--muted); background: transparent; }
+.slot.go { border: 2px solid transparent; background: var(--grad); color: var(--on-brand); }
+.slot.go:active { filter: brightness(.94); transform: translateY(1px); }
+.slot.go:focus-visible { outline: 3px solid var(--brand); outline-offset: 2px; }
+.board .slot { min-height: 54px; font-size: 19px; border-radius: 14px; }
 a.back { color: var(--brand-text); font-weight: 650; text-decoration: none; display: inline-flex; align-items: center; min-height: 30px; align-self: flex-start; }
 .round { font-weight: 800; font-size: 17px; color: var(--brand-text); background: var(--soft); padding: 5px 12px; border-radius: 99px; white-space: nowrap; }
 
@@ -67,6 +74,7 @@ a.back { color: var(--brand-text); font-weight: 650; text-decoration: none; disp
 .btn.danger { color: var(--bad); border-color: var(--bad); }
 .btn.small { min-height: 44px; padding: 8px 14px; font-size: 15px; }
 .btn.huge { min-height: 80px; font-size: 25px; border-radius: 18px; width: 100%; line-height: 1.15; }
+.btn.huge.quiet { font-weight: 650; color: var(--ink-2); }
 .btn[disabled] { opacity: .45; cursor: default; }
 .btn:focus-visible, .tile:focus-visible, .chip:focus-visible, .pick:focus-visible, .key:focus-visible, .nav a:focus-visible, .pl:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid var(--brand); outline-offset: 2px; }
 input[type=text], input[type=email], input[type=date], input[type=password], input[type=number], input[type=search], select { border: 1px solid var(--line-2); background: var(--surface); border-radius: 12px; padding: 12px 14px; min-height: 52px; min-width: 0; width: 100%; }
