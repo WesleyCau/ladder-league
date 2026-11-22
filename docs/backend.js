@@ -110,6 +110,16 @@ const Backends = (() => {
       } catch (e) { return failure(e); }
     }
 
+    async function confirmLive(sess, args) {
+      const idx = sess.pools.findIndex(p => p.id === args.pool), round = parseInt(args.round, 10);
+      if (idx < 0) return { ok: false, code: "missing", message: "Pool not found." };
+      if (!Ladder.roundReady(sess, sess.pools[idx], round)) return { ok: false, code: "scores", message: "Enter every score in this round first." };
+      try {
+        await db.runTransaction(db.ref(database, `sessions/${args.sid}/pools/${idx}/confirmed`), cur => ((cur || 0) === round ? round + 1 : undefined));
+        return { ok: true, result: {} };
+      } catch (e) { return failure(e); }
+    }
+
     return {
       kind: "firebase", orgMode: "account", isOrg,
       hasOrganiser: () => Object.keys(admins).length > 0,
@@ -127,9 +137,9 @@ const Backends = (() => {
         au.onAuthStateChanged(auth, u => { user = u; emit(); });
       },
       async send(type, args) {
-        if (type === "game.score" || type === "game.clear") {
+        if (type === "game.score" || type === "game.clear" || type === "round.confirm") {
           const sess = state.sessions.find(s => s.id === args.sid);
-          if (sess && sess.status === "live") return scoreLive(type, args);
+          if (sess && sess.status === "live") return type === "round.confirm" ? confirmLive(sess, args) : scoreLive(type, args);
         }
         if (!isOrg()) return { ok: false, code: "pin", message: "That needs the organiser to be signed in." };
         const next = clone(state);

@@ -75,6 +75,16 @@ test("full session flow: pools, new player, scores, clash, close, correction", (
   L.apply(st, "game.score", { sid, gid, s1: 11, s2: 4, replace: true }, false);
   throwsCode(() => L.apply(st, "game.score", { sid, gid, s1: 7, s2: 7, replace: true }, false), "invalid");
 
+  // rounds: scores stay on screen until someone confirms, then the pool moves on
+  const poolA = sess.pools[0];
+  assert.strictEqual(poolA.confirmed, 0);
+  throwsCode(() => L.apply(st, "round.confirm", { sid, pool: "A", round: 0 }, false), "scores");
+  L.apply(st, "game.score", { sid, gid: poolA.rounds[0][1], s1: 9, s2: 11 }, false);
+  throwsCode(() => L.apply(st, "round.confirm", { sid, pool: "A", round: 1 }, false), "order");
+  assert.strictEqual(L.apply(st, "round.confirm", { sid, pool: "A", round: 0 }, false).round, 1);
+  assert.strictEqual(L.apply(st, "round.confirm", { sid, pool: "A", round: 0 }, false).round, 1);   // second device, same button
+  assert.strictEqual(poolA.confirmed, 1);
+
   const before = Object.assign({}, st.ratings.current);
   let i = 0;
   for (const g of Object.values(sess.games)) if (g.pool === "A" && g.status === "pending") {

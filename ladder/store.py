@@ -224,7 +224,7 @@ class Store:
         for i in range(k):
             count = base + (1 if i < extra else 0)
             pid = chr(65 + i)
-            pools.append(dict(id=pid, name="Pool " + pid, courts=courts.get(pid, 1), players=ranked[at:at + count], rounds=[]))
+            pools.append(dict(id=pid, name="Pool " + pid, courts=courts.get(pid, 1), confirmed=0, players=ranked[at:at + count], rounds=[]))
             at += count
         sess["pools"] = pools
         sess["games"] = {}
@@ -252,7 +252,7 @@ class Store:
         if a.get("add"):
             sess = self._session(a.get("sid"), "setup")
             pid = chr(65 + len(sess["pools"]))
-            sess["pools"].append(dict(id=pid, name="Pool " + pid, courts=1, players=[], rounds=[]))
+            sess["pools"].append(dict(id=pid, name="Pool " + pid, courts=1, confirmed=0, players=[], rounds=[]))
             return
         pool = next((p for p in sess["pools"] if p["id"] == a.get("pool")), None)
         if pool is None:
@@ -284,6 +284,7 @@ class Store:
         sess["games"] = {}
         for pool in sess["pools"]:
             pool["rounds"] = []
+            pool["confirmed"] = 0
             for ri, rd in enumerate(scheduler.generate(pool["players"], seed=sess["id"] + pool["id"])):
                 ids = []
                 for t1, t2 in rd:
@@ -303,6 +304,8 @@ class Store:
         if self._done(sess):
             raise ActionError("scores", "Scores have been entered, so the session cannot go back to setup.")
         sess["status"] = "setup"
+        for pool in sess["pools"]:
+            pool["confirmed"] = 0
 
     def do_session_delete(self, a, org):
         sess = self._session(a.get("sid"), "setup", "live")
@@ -351,6 +354,22 @@ class Store:
         if g["status"] == "done":
             raise ActionError("scores", "Clear the score first.")
         g["status"] = "skipped" if a.get("skip", True) else "pending"
+
+    def do_round_confirm(self, a, org):
+        """Move a pool on to its next round once every game in the current one has a score."""
+        sess = self._session(a.get("sid"), "live")
+        pool = next((p for p in sess["pools"] if p["id"] == a.get("pool")), None)
+        if pool is None:
+            raise ActionError("missing", "Pool not found.")
+        rnd_no, at = int(a.get("round", -1)), pool.get("confirmed", 0)
+        if rnd_no < at:
+            return dict(round=at)
+        if rnd_no > at or rnd_no >= len(pool["rounds"]):
+            raise ActionError("order", "That round is not being played yet.")
+        if any(sess["games"][gid]["status"] == "pending" for gid in pool["rounds"][rnd_no]):
+            raise ActionError("scores", "Enter every score in this round first.")
+        pool["confirmed"] = rnd_no + 1
+        return dict(round=pool["confirmed"])
 
     def do_session_substitute(self, a, org):
         sess = self._session(a.get("sid"), "setup", "live")
@@ -405,4 +424,4 @@ class Store:
 
 
 # Actions anyone on the network may send during a live session. Everything else needs the organiser PIN.
-OPEN_ACTIONS = {"game.score", "game.clear"}
+OPEN_ACTIONS = {"game.score", "game.clear", "round.confirm"}

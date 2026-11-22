@@ -110,6 +110,19 @@ class StoreTest(unittest.TestCase):
         with self.assertRaises(ActionError):
             st.apply("game.score", dict(sid=sid, gid=gid, s1=7, s2=7, replace=True), org=False)
 
+        # rounds: scores stay on screen until someone confirms, then the pool moves on
+        self.assertEqual(pool_a["confirmed"], 0)
+        with self.assertRaises(ActionError) as cm:
+            st.apply("round.confirm", dict(sid=sid, pool="A", round=0), org=False)
+        self.assertEqual(cm.exception.code, "scores")
+        st.apply("game.score", dict(sid=sid, gid=pool_a["rounds"][0][1], s1=9, s2=11), org=False)
+        with self.assertRaises(ActionError) as cm:
+            st.apply("round.confirm", dict(sid=sid, pool="A", round=1), org=False)
+        self.assertEqual(cm.exception.code, "order")
+        self.assertEqual(st.apply("round.confirm", dict(sid=sid, pool="A", round=0), org=False)["round"], 1)
+        self.assertEqual(st.apply("round.confirm", dict(sid=sid, pool="A", round=0), org=False)["round"], 1)
+        self.assertEqual(pool_a["confirmed"], 1)
+
         before = dict(st.state["ratings"]["current"])
         for g in sess["games"].values():
             if g["pool"] == "A" and g["status"] == "pending":

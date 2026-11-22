@@ -218,7 +218,7 @@
 
   /* ---------------- league rules (actions on the state document) ---------------- */
   const DEFAULT_SEEDS = [3700, 3500, 3300, 3100];
-  const OPEN_ACTIONS = new Set(["game.score", "game.clear"]);   // anyone, during a live session
+  const OPEN_ACTIONS = new Set(["game.score", "game.clear", "round.confirm"]);   // anyone, during a live session
 
   function ActionError(code, message, extra) { this.code = code; this.message = message; this.extra = extra || {}; }
   const fail = (code, message, extra) => { throw new ActionError(code, message, extra); };
@@ -243,7 +243,7 @@
         games[gid] = Object.assign({}, g, { t1: toArray(g.t1), t2: toArray(g.t2), s1: g.s1 == null ? null : g.s1, s2: g.s2 == null ? null : g.s2 });
       }
       return Object.assign({}, s, { attending: toArray(s.attending), games,
-        pools: toArray(s.pools).map(p => Object.assign({}, p, { players: toArray(p.players), rounds: toArray(p.rounds).map(toArray) })) });
+        pools: toArray(s.pools).map(p => Object.assign({}, p, { confirmed: p.confirmed || 0, players: toArray(p.players), rounds: toArray(p.rounds).map(toArray) })) });
     });
     const r = st.ratings || {};
     st.ratings = { current: r.current || {}, sessions: r.sessions || {}, games: r.games || {}, totals: r.totals || {} };
@@ -345,7 +345,7 @@
     let at = 0;
     for (let i = 0; i < k; i++) {
       const count = base + (i < extra ? 1 : 0), id = String.fromCharCode(65 + i);
-      pools.push({ id, name: "Pool " + id, courts: courts[id] || 1, players: ranked.slice(at, at + count), rounds: [] });
+      pools.push({ id, name: "Pool " + id, courts: courts[id] || 1, confirmed: 0, players: ranked.slice(at, at + count), rounds: [] });
       at += count;
     }
     s.pools = pools; s.games = {};
@@ -361,7 +361,7 @@
   };
   H["session.pool"] = (st, a) => {
     const s = getSession(st, a.sid, "setup", "live");
-    if (a.add) { const s2 = getSession(st, a.sid, "setup"), id = String.fromCharCode(65 + s2.pools.length); s2.pools.push({ id, name: "Pool " + id, courts: 1, players: [], rounds: [] }); return; }
+    if (a.add) { const s2 = getSession(st, a.sid, "setup"), id = String.fromCharCode(65 + s2.pools.length); s2.pools.push({ id, name: "Pool " + id, courts: 1, confirmed: 0, players: [], rounds: [] }); return; }
     const pool = s.pools.find(p => p.id === a.pool) || fail("missing", "Pool not found.");
     if (a.remove) {
       const s2 = getSession(st, a.sid, "setup");
@@ -378,6 +378,7 @@
     for (const pool of s.pools) { const n = pool.players.length; if (n < MIN_POOL || n > MAX_POOL) fail("size", `${pool.name} has ${n} players. A pool needs ${MIN_POOL} to ${MAX_POOL}.`); }
     s.games = {};
     for (const pool of s.pools) {
+      pool.confirmed = 0;
       pool.rounds = generate(pool.players, s.id + pool.id).map((rd, ri) => rd.map(([t1, t2]) => {
         const gid = nextId(st, "g");
         s.games[gid] = { id: gid, pool: pool.id, round: ri, t1, t2, s1: null, s2: null, status: "pending" };
@@ -386,7 +387,7 @@
     }
   };
   H["session.start"] = (st, a, org) => { const s = getSession(st, a.sid, "setup"); if (!Object.keys(s.games).length) H["session.schedule"](st, a, org); s.status = "live"; };
-  H["session.unstart"] = (st, a) => { const s = getSession(st, a.sid, "live"); if (doneGames(s).length) fail("scores", "Scores have been entered, so the session cannot go back to setup."); s.status = "setup"; };
+  H["session.unstart"] = (st, a) => { const s = getSession(st, a.sid, "live"); if (doneGames(s).length) fail("scores", "Scores have been entered, so the session cannot go back to setup."); s.status = "setup"; s.pools.forEach(p => { p.confirmed = 0; }); };
   H["session.delete"] = (st, a) => { const s = getSession(st, a.sid, "setup", "live"); if (doneGames(s).length) fail("scores", "Scores have been entered. Finish the session instead."); st.sessions = st.sessions.filter(x => x !== s); };
 
   function getGame(st, a, org) {
@@ -415,6 +416,17 @@
     if (s.status === "closed") recompute(st);
   };
   H["game.skip"] = (st, a, org) => { const { g } = getGame(st, a, org); if (g.status === "done") fail("scores", "Clear the score first."); g.status = a.skip === false ? "pending" : "skipped"; };
+  /* A round is ready to confirm when none of its games is still waiting for a score. */
+  const roundReady = (s, pool, round) => (pool.rounds[round] || []).length > 0 && pool.rounds[round].every(id => s.games[id] && s.games[id].status !== "pending");
+  H["round.confirm"] = (st, a) => {
+    const s = getSession(st, a.sid, "live"), pool = s.pools.find(p => p.id === a.pool) || fail("missing", "Pool not found.");
+    const round = parseInt(a.round, 10), at = pool.confirmed || 0;
+    if (round < at) return { round: at };                       // another device already moved this pool on
+    if (round > at || round >= pool.rounds.length) fail("order", "That round is not being played yet.");
+    if (!roundReady(s, pool, round)) fail("scores", "Enter every score in this round first.");
+    pool.confirmed = round + 1;
+    return { round: pool.confirmed };
+  };
   H["session.substitute"] = (st, a) => {
     const s = getSession(st, a.sid, "setup", "live"), out = a.out, neu = a.in, pNew = getPlayer(st, neu);
     if (!pNew.active) fail("inactive", `${pNew.name} is marked as dropped out.`);
@@ -453,6 +465,6 @@
     return result;
   }
 
-  Object.assign(L, { rng, allOrders, compute, roundCount, generate, summary, emptyState, normalize, apply, scoreGame, checkScore,
+  Object.assign(L, { rng, allOrders, compute, roundCount, generate, summary, emptyState, normalize, apply, scoreGame, checkScore, roundReady,
     ActionError, OPEN_ACTIONS, MIN_POOL, MAX_POOL });
 })(typeof module !== "undefined" && module.exports ? module.exports : (window.Ladder = {}));
