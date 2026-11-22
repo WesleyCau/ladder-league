@@ -142,6 +142,15 @@ const Backends = (() => {
           if (sess && sess.status === "live") return type === "round.confirm" ? confirmLive(sess, args) : scoreLive(type, args);
         }
         if (!isOrg()) return { ok: false, code: "pin", message: "That needs the organiser to be signed in." };
+        if (type === "round.back") {       // write just that pool's round, so other pools' confirms are never overwritten
+          const sess = state.sessions.find(s => s.id === args.sid), idx = sess ? sess.pools.findIndex(p => p.id === args.pool) : -1;
+          if (sess && sess.status === "live" && idx >= 0 && sess.pools[idx].confirmed > 0) {
+            try {
+              await db.runTransaction(db.ref(database, `sessions/${args.sid}/pools/${idx}/confirmed`), cur => (cur > 0 ? cur - 1 : undefined));
+              return { ok: true, result: {} };
+            } catch (e) { return failure(e); }
+          }
+        }
         const next = clone(state);
         try {
           const result = Ladder.apply(next, type, args, true), out = {};

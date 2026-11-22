@@ -55,6 +55,7 @@ main { max-width: 1180px; margin: 0 auto; padding: 20px 16px 28px; display: flex
 .note b { color: var(--ink); }
 .err { color: var(--bad); font-weight: 650; }
 .hint { color: var(--muted); text-align: center; padding: 6px 0; }
+.orgrow { justify-content: center; }
 a.back { color: var(--brand-text); font-weight: 650; text-decoration: none; display: inline-flex; align-items: center; min-height: 44px; }
 .round { font-weight: 750; font-size: 15px; color: var(--brand-text); background: var(--soft); padding: 5px 12px; border-radius: 99px; white-space: nowrap; }
 

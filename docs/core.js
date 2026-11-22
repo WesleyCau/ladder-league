@@ -427,6 +427,13 @@
     pool.confirmed = round + 1;
     return { round: pool.confirmed };
   };
+  /* Organiser only: undo a confirm made too early. Scores are untouched. */
+  H["round.back"] = (st, a) => {
+    const s = getSession(st, a.sid, "live"), pool = s.pools.find(p => p.id === a.pool) || fail("missing", "Pool not found.");
+    if (!(pool.confirmed > 0)) fail("order", "This pool is already on its first round.");
+    pool.confirmed -= 1;
+    return { round: pool.confirmed };
+  };
   H["session.substitute"] = (st, a) => {
     const s = getSession(st, a.sid, "setup", "live"), out = a.out, neu = a.in, pNew = getPlayer(st, neu);
     if (!pNew.active) fail("inactive", `${pNew.name} is marked as dropped out.`);

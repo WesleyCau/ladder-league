@@ -84,6 +84,11 @@ test("full session flow: pools, new player, scores, clash, close, correction", (
   assert.strictEqual(L.apply(st, "round.confirm", { sid, pool: "A", round: 0 }, false).round, 1);
   assert.strictEqual(L.apply(st, "round.confirm", { sid, pool: "A", round: 0 }, false).round, 1);   // second device, same button
   assert.strictEqual(poolA.confirmed, 1);
+  throwsCode(() => L.apply(st, "round.back", { sid, pool: "A" }, false), "pin");                     // organiser only
+  assert.strictEqual(L.apply(st, "round.back", { sid, pool: "A" }, true).round, 0);
+  throwsCode(() => L.apply(st, "round.back", { sid, pool: "A" }, true), "order");
+  assert.strictEqual(sess.games[poolA.rounds[0][1]].status, "done");                                 // scores untouched
+  L.apply(st, "round.confirm", { sid, pool: "A", round: 0 }, false);
 
   const before = Object.assign({}, st.ratings.current);
   let i = 0;

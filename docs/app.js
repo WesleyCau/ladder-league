@@ -122,6 +122,14 @@ function confirmBlock(s, pool, r) {
   return r.ready ? `<button class="btn huge primary" data-act="confirmRound" data-sid="${s.id}" data-pool="${pool.id}" data-round="${r.at}">${label}</button>`
     : `<p class="hint">${r.waiting === 1 ? "One score to go." : `${r.waiting} scores to go.`} Scores stay here until the round is confirmed.</p>`;
 }
+/* Organiser only: step a pool back a round after a confirm made too early. */
+function backBlock(s, pool, r) {
+  if (!isOrg() || r.at === 0) return "";
+  const key = "back-" + pool.id;
+  return app.confirm === key
+    ? `<div class="row orgrow"><span class="muted">Go back to round ${r.at}? Scores are kept.</span><button class="btn small" data-act="backRound" data-sid="${s.id}" data-pool="${pool.id}">Yes, go back</button><button class="btn small" data-act="cancel">No</button></div>`
+    : `<div class="row orgrow"><button class="btn small" data-act="ask" data-key="${key}">Organiser: back to round ${r.at}</button></div>`;
+}
 const namesList = ids => ids.map(nm).map(esc).join(", ");
 function standingsTable(s, pool) {
   const rows = poolTable(s, pool);
@@ -180,10 +188,10 @@ function viewCourt(pid) {
     <div class="head"><div class="row spread"><h1>${esc(pool.name)}</h1><span class="round">${r.finished ? "Finished" : `Round ${r.at + 1} of ${r.total}`}</span></div>
       <span class="bar on-surface"><i style="width:${pct(r)}%"></i></span>
       <p class="muted">${r.done} of ${r.playable} games played</p></div>
-    ${r.finished ? '<div class="note"><b>All rounds finished.</b> Thanks for playing. Final standings are below.</div>' : `
+    ${r.finished ? '<div class="note"><b>All rounds finished.</b> Thanks for playing. Final standings are below.</div>' + backBlock(s, pool, r) : `
       <section class="stack">${roundCards(s, pool, r)}
         ${r.sitting.length ? `<p class="sit"><b>Sitting out</b> ${namesList(r.sitting)}</p>` : ""}
-        ${errLine("court")}${confirmBlock(s, pool, r)}</section>`}
+        ${errLine("court")}${confirmBlock(s, pool, r)}${backBlock(s, pool, r)}</section>`}
     ${r.next.length ? `<section class="stack"><h2 class="sub">Next: round ${r.at + 2}</h2>
         ${r.next.map(g => matchCard(s, g, { preview: true })).join("")}
         ${r.sittingNext.length ? `<p class="sit"><b>Sitting out</b> ${namesList(r.sittingNext)}</p>` : ""}</section>` : ""}
@@ -201,7 +209,7 @@ function viewBoard() {
       return `<div class="stack">
         <div class="row spread"><h2><a href="#/court/${p.id}">${esc(p.name)}</a></h2><span class="round">${r.finished ? "Finished" : `Round ${r.at + 1} of ${r.total}`}</span></div>
         <span class="bar on-surface"><i style="width:${pct(r)}%"></i></span>
-        ${r.finished ? '<div class="note">All rounds finished.</div>' : roundCards(s, p, r) + confirmBlock(s, p, r)}
+        ${r.finished ? '<div class="note">All rounds finished.</div>' : roundCards(s, p, r) + confirmBlock(s, p, r)}${backBlock(s, p, r)}
         ${r.next.length ? `<div class="nextlist"><b>Next round</b>${r.next.map(g => `<span>${teamLine(g.t1)} <i>v</i> ${teamLine(g.t2)}</span>`).join("")}</div>` : ""}
       </div>`;
     }).join("")}</div>`;
@@ -499,6 +507,7 @@ const A = {
     render();
   },
   confirmRound: d => act("court", "round.confirm", { sid: d.sid, pool: d.pool, round: +d.round }, "Round confirmed"),
+  backRound: d => { app.confirm = null; return act("court", "round.back", { sid: d.sid, pool: d.pool }, "Back one round"); },
   tab: d => { app.tab = d.tab; render(); },
   lock: async () => { await app.be.signOut(); app.form.password = ""; render(); },
   export: () => {

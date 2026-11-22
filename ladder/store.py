@@ -371,6 +371,17 @@ class Store:
         pool["confirmed"] = rnd_no + 1
         return dict(round=pool["confirmed"])
 
+    def do_round_back(self, a, org):
+        """Organiser only: undo a confirm made too early. Scores are untouched."""
+        sess = self._session(a.get("sid"), "live")
+        pool = next((p for p in sess["pools"] if p["id"] == a.get("pool")), None)
+        if pool is None:
+            raise ActionError("missing", "Pool not found.")
+        if pool.get("confirmed", 0) <= 0:
+            raise ActionError("order", "This pool is already on its first round.")
+        pool["confirmed"] -= 1
+        return dict(round=pool["confirmed"])
+
     def do_session_substitute(self, a, org):
         sess = self._session(a.get("sid"), "setup", "live")
         out, new = a.get("out"), a.get("in")

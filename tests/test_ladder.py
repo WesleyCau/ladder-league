@@ -122,6 +122,15 @@ class StoreTest(unittest.TestCase):
         self.assertEqual(st.apply("round.confirm", dict(sid=sid, pool="A", round=0), org=False)["round"], 1)
         self.assertEqual(st.apply("round.confirm", dict(sid=sid, pool="A", round=0), org=False)["round"], 1)
         self.assertEqual(pool_a["confirmed"], 1)
+        with self.assertRaises(ActionError) as cm:
+            st.apply("round.back", dict(sid=sid, pool="A"), org=False)       # organiser only
+        self.assertEqual(cm.exception.code, "pin")
+        self.assertEqual(st.apply("round.back", dict(sid=sid, pool="A"), org=True)["round"], 0)
+        with self.assertRaises(ActionError) as cm:
+            st.apply("round.back", dict(sid=sid, pool="A"), org=True)
+        self.assertEqual(cm.exception.code, "order")
+        self.assertEqual(sess["games"][pool_a["rounds"][0][1]]["status"], "done")   # scores untouched
+        st.apply("round.confirm", dict(sid=sid, pool="A", round=0), org=False)
 
         before = dict(st.state["ratings"]["current"])
         for g in sess["games"].values():
