@@ -131,37 +131,42 @@ function poolTable(s, pool) {
 
 /* ---------- full screen (All courts on the tablet) ---------- */
 const fsOn = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
-/* iPads and iPhones do have a full screen mode, but Safari treats a run of taps in it (the score keypad) as typing on a
-     fake keyboard: it throws the page out of full screen with a warning about being tricked. So it is not used there. */
 const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 const isHomeScreenApp = () => navigator.standalone === true || (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
-const fsCan = () => { const d = document.documentElement; return !isIOS() && !!(d.requestFullscreen || d.webkitRequestFullscreen); };
-/* Some tablets (iPads in particular, outside Safari) give web pages no full screen. There the button hides this app's
-   own menus instead, which is the most a page can do, and says how to get the real thing. */
-function fsToggle() {
+const fsCan = () => { const d = document.documentElement; return !isHomeScreenApp() && !!(d.requestFullscreen || d.webkitRequestFullscreen); };
+function fsEnter() {
   const d = document.documentElement;
-  if (!fsCan()) {
-    app.kiosk = !app.kiosk;
-    if (app.kiosk && !isHomeScreenApp()) toast(isIOS() ? "On an iPad, full screen blocks tapping in scores, so the menus are hidden instead. For a true full screen: Share, then Add to Home Screen." : "This browser cannot go fully full screen, so the menus are hidden instead.", 8000);
-    return render();
-  }
-  try {
-    const p = fsOn() ? (document.exitFullscreen || document.webkitExitFullscreen).call(document) : (d.requestFullscreen || d.webkitRequestFullscreen).call(d);
-    if (p && p.catch) p.catch(() => toast("This browser would not go full screen."));
-  } catch (e) { toast("This browser would not go full screen."); }
+  try { const p = (d.requestFullscreen || d.webkitRequestFullscreen).call(d); if (p && p.catch) p.catch(() => {}); } catch (e) { /* the browser said no: stay as we are */ }
+}
+function fsExit() {
+  try { const p = (document.exitFullscreen || document.webkitExitFullscreen).call(document); if (p && p.catch) p.catch(() => {}); } catch (e) { /* already out */ }
+}
+const fsToggle = () => (fsOn() ? fsExit() : fsEnter());
+/* Safari on an iPad reads the quick taps of score entry in full screen as typing on a fake keyboard and interrupts with a
+   warning. So on an iPad the score screen steps out of full screen, and the tap that finishes it (Save, close) steps back in. */
+function fsPauseForScore() { if (isIOS() && fsOn()) { app.fsBack = true; fsExit(); } }
+function fsResume() { if (app.fsBack) { app.fsBack = false; fsEnter(); } }
+/* All courts fills the height of the screen: whatever is spare below the lowest pool is shared out as space around the names. */
+function fillBoard() {
+  const board = $(".board");
+  if (!board) return;
+  board.style.setProperty("--grow", "0px");
+  if (document.documentElement.clientWidth < 900 || window.scrollY > 0) return;
+  const stacks = [...board.children].filter(e => e.classList.contains("stack"));
+  const cards = Math.max(0, ...stacks.map(e => e.querySelectorAll(".bmatch").length));
+  if (!cards) return;
+  const spare = window.innerHeight - Math.max(...stacks.map(e => e.getBoundingClientRect().bottom)) - 22;      // 22: the page's own bottom margin, so nothing scrolls
+  if (spare > 4) board.style.setProperty("--grow", Math.min(26, Math.floor(spare / (4 * cards) * 10) / 10) + "px");
 }
 
 /* ---------- shared pieces ---------- */
 function shell(body) {
   const s = openSess(), route = location.hash.split("/")[1] || "";
   const link = (href, key, ico, label) => `<a href="${href}" ${route === key ? 'aria-current="page"' : ""}><span class="ico" aria-hidden="true">${ico}</span>${label}</a>`;
-  const kiosk = app.kiosk && route === "board";
-  document.body.classList.toggle("kiosk", !!kiosk);
   return `
   <header class="top"><div class="top-in">
     <div class="top-l"><div class="brand">${esc(app.st.league.name)}</div>${s && s.status === "live" ? '<span class="live-dot">Live</span>' : ""}</div>
-    <div class="top-c">${route === "board" ? `<button class="fsbtn" data-act="fullscreen">${fsOn() || kiosk ? "Exit full screen" : "Full screen"}</button>` : ""}</div>
-    ${kiosk && isIOS() && !isHomeScreenApp() ? '<span class="ktip">For no Safari bars: Share, Add to Home Screen</span>' : ""}
+    <div class="top-c">${route === "board" && fsCan() ? `<button class="fsbtn" data-act="fullscreen">${fsOn() ? "Exit full screen" : "Full screen"}</button>` : ""}</div>
     <nav class="nav" aria-label="Main">
       ${link("#/", "", "●", "Tonight")}${link("#/board", "board", "▦", "All courts")}${link("#/standings", "standings", "≡", "Standings")}${link("#/org", "org", "⚙", "Organiser")}
     </nav>
@@ -934,6 +939,8 @@ function render() {
   if (!up && overlayUp && history.state && history.state.overlay) { overlayLeaving = true; history.back(); }
   overlayUp = up;
   document.title = app.st.league.name;
+  if (!app.flow) app.fsBack = false;
+  fillBoard();
   if (focused && !app.flow) {
     const el = document.getElementById(focused);
     if (el) { el.focus(); try { if (selStart != null) el.setSelectionRange(selStart, selStart); } catch (e) { /* not a text input */ } }
@@ -942,8 +949,8 @@ function render() {
 
 /* ---------- actions ---------- */
 const A = {
-  flow: d => openFlow(d.sid, d.gid),
-  fclose: () => { app.flow = null; render(); },
+  flow: d => { fsPauseForScore(); openFlow(d.sid, d.gid); },
+  fclose: () => { fsResume(); app.flow = null; render(); },
   fwin: d => { const f = app.flow; f.win = +d.win; f.ws = f.pts; f.ls = null; f.sure = false; f.step = "score"; render(); },
   fscore: d => { const f = app.flow; f.ls = +d.ls; f.ws = f.pts; f.step = "confirm"; render(); },
   fother: () => { const f = app.flow; f.ws = f.pts - 1; f.ls = Math.max(0, f.pts - 2); f.step = "other"; render(); },
@@ -953,6 +960,7 @@ const A = {
   fkeep: () => { app.flow.sure = false; render(); },
   fsave: async d => {
     const f = app.flow; if (f.busy) return;
+    fsResume();
     f.busy = true; f.err = ""; render();
     const s1 = f.win === 1 ? f.ws : f.ls, s2 = f.win === 1 ? f.ls : f.ws, args = { sid: f.sid, gid: f.gid, s1, s2, replace: !!d.replace || !!f.was };
     if (f.was) args.was = f.was;
@@ -969,6 +977,7 @@ const A = {
   fclear: async () => {
     const f = app.flow;
     if (!f.sure) { f.sure = true; return render(); }
+    fsResume();
     const args = { sid: f.sid, gid: f.gid };
     if (f.hist) args.history = true;
     const j = await send("game.clear", args);
@@ -1167,6 +1176,6 @@ window.addEventListener("popstate", () => {
   if (app.flow || app.dialog) { app.flow = null; app.dialog = null; render(); }      // Back pressed with a screen open: close it
   afterOverlay.splice(0).forEach(fn => fn());
 });
-window.addEventListener("hashchange", () => { app.kiosk = false; app.flow = null; app.err = {}; app.dialog = null; app.confirm = null; app.sel = null; app.edit = null; window.scrollTo(0, 0); render(); });
+window.addEventListener("hashchange", () => { app.flow = null; app.err = {}; app.dialog = null; app.confirm = null; app.sel = null; app.edit = null; window.scrollTo(0, 0); render(); });
 
 boot();
