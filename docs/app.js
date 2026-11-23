@@ -129,6 +129,17 @@ function poolTable(s, pool) {
   return [...rows.values()].sort((a, b) => b.w - a.w || (b.pf - b.pa) - (a.pf - a.pa) || nm(a.p).localeCompare(nm(b.p)));
 }
 
+/* ---------- full screen (All courts on the tablet) ---------- */
+const fsOn = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+const fsCan = () => { const d = document.documentElement; return !!(d.requestFullscreen || d.webkitRequestFullscreen); };
+function fsToggle() {
+  const d = document.documentElement;
+  try {
+    const p = fsOn() ? (document.exitFullscreen || document.webkitExitFullscreen).call(document) : (d.requestFullscreen || d.webkitRequestFullscreen).call(d);
+    if (p && p.catch) p.catch(() => toast("This browser would not go full screen."));
+  } catch (e) { toast("This browser would not go full screen."); }
+}
+
 /* ---------- shared pieces ---------- */
 function shell(body) {
   const s = openSess(), route = location.hash.split("/")[1] || "";
@@ -137,6 +148,7 @@ function shell(body) {
   <header class="top"><div class="top-in">
     <div class="brand">${esc(app.st.league.name)}</div>
     ${s && s.status === "live" ? '<span class="live-dot">Live</span>' : ""}
+    ${route === "board" && fsCan() ? `<button class="fsbtn" data-act="fullscreen">${fsOn() ? "Exit full screen" : "Full screen"}</button>` : ""}
     <nav class="nav" aria-label="Main">
       ${link("#/", "", "●", "Tonight")}${link("#/board", "board", "▦", "All courts")}${link("#/standings", "standings", "≡", "Standings")}${link("#/org", "org", "⚙", "Organiser")}
     </nav>
@@ -952,6 +964,7 @@ const A = {
   confirmRound: d => act("court", "round.confirm", { sid: d.sid, pool: d.pool, round: +d.round }, "Round confirmed"),
   backRound: d => { app.confirm = null; return act("court", "round.back", { sid: d.sid, pool: d.pool }, "Back one round"); },
   nameStyle: d => act("league", "league.update", { nameStyle: d.style }),
+  fullscreen: () => fsToggle(),
   tab: d => { app.tab = d.tab; render(); },
   hl: d => togglePlayer(d.pid),
   hon: d => togglePlayer(d.pid, true),
@@ -1133,6 +1146,8 @@ document.addEventListener("touchmove", e => { if (drag.active) e.preventDefault(
 document.addEventListener("contextmenu", e => { if (drag.pid && drag.touch) e.preventDefault(); });
 let resizeTimer = 0;
 window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (!app.flow) render(); }, 150); });
+document.addEventListener("fullscreenchange", () => render());
+document.addEventListener("webkitfullscreenchange", () => render());
 window.addEventListener("popstate", () => {
   overlayLeaving = false;
   if (app.flow || app.dialog) { app.flow = null; app.dialog = null; render(); }      // Back pressed with a screen open: close it
