@@ -154,11 +154,10 @@ function shell(body) {
   const kiosk = app.kiosk && route === "board";
   document.body.classList.toggle("kiosk", !!kiosk);
   return `
-  ${kiosk ? `<div class="kbar"><span>${esc(app.st.league.name)}</span><button data-act="fullscreen">Show menus ✕</button></div>` : ""}
+  ${kiosk ? `<div class="kbar"><span>${esc(app.st.league.name)}</span><button data-act="fullscreen">Show menus ✕</button><span></span></div>` : ""}
   <header class="top"><div class="top-in">
-    <div class="brand">${esc(app.st.league.name)}</div>
-    ${s && s.status === "live" ? '<span class="live-dot">Live</span>' : ""}
-    ${route === "board" ? `<button class="fsbtn" data-act="fullscreen">${fsOn() ? "Exit full screen" : "Full screen"}</button>` : ""}
+    <div class="top-l"><div class="brand">${esc(app.st.league.name)}</div>${s && s.status === "live" ? '<span class="live-dot">Live</span>' : ""}</div>
+    <div class="top-c">${route === "board" ? `<button class="fsbtn" data-act="fullscreen">${fsOn() ? "Exit full screen" : "Full screen"}</button>` : ""}</div>
     <nav class="nav" aria-label="Main">
       ${link("#/", "", "●", "Tonight")}${link("#/board", "board", "▦", "All courts")}${link("#/standings", "standings", "≡", "Standings")}${link("#/org", "org", "⚙", "Organiser")}
     </nav>
