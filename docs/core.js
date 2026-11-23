@@ -389,6 +389,13 @@
   };
   H["session.start"] = (st, a, org) => { const s = getSession(st, a.sid, "setup"); if (!Object.keys(s.games).length) H["session.schedule"](st, a, org); s.status = "live"; };
   H["session.unstart"] = (st, a) => { const s = getSession(st, a.sid, "live"); if (doneGames(s).length) fail("scores", "Scores have been entered, so the session cannot go back to setup."); s.status = "setup"; s.pools.forEach(p => { p.confirmed = 0; }); };
+  /* Back to a fresh start for the same draw: no scores, every pool on round 1. */
+  H["session.reset"] = (st, a) => {
+    const s = getSession(st, a.sid, "live");
+    for (const g of Object.values(s.games)) { g.s1 = null; g.s2 = null; g.status = "pending"; delete g.at; }
+    s.pools.forEach(p => { p.confirmed = 0; });
+    return { games: Object.keys(s.games).length };
+  };
   H["session.delete"] = (st, a) => { const s = getSession(st, a.sid, "setup", "live"); if (doneGames(s).length) fail("scores", "Scores have been entered. Finish the session instead."); st.sessions = st.sessions.filter(x => x !== s); };
 
   function getGame(st, a, org) {

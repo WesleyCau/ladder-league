@@ -139,4 +139,22 @@ test("substitute, dropout, uneven attendance, database round trip", () => {
   assert.ok(!st.sessions[0].attending.includes(out));
 });
 
+test("reset: scores and rounds cleared, draw kept, organiser only", () => {
+  const st = league(8);
+  const sid = L.apply(st, "session.create", { date: "2026-11-30" }, true).id, sess = st.sessions[0];
+  L.apply(st, "session.assign", { sid }, true);
+  L.apply(st, "session.start", { sid }, true);
+  const pool = sess.pools[0], draw = JSON.stringify(pool.rounds), teams = JSON.stringify(Object.values(sess.games).map(g => [g.t1, g.t2]));
+  pool.rounds[0].forEach(gid => L.apply(st, "game.score", { sid, gid, s1: 11, s2: 5 }, false));
+  L.apply(st, "round.confirm", { sid, pool: pool.id, round: 0 }, false);
+  L.apply(st, "game.skip", { sid, gid: pool.rounds[1][0] }, true);
+  throwsCode(() => L.apply(st, "session.reset", { sid }, false), "pin");
+  assert.strictEqual(L.apply(st, "session.reset", { sid }, true).games, 14);
+  assert.ok(Object.values(sess.games).every(g => g.status === "pending" && g.s1 === null && g.s2 === null && !("at" in g)));
+  assert.strictEqual(pool.confirmed, 0);
+  assert.strictEqual(JSON.stringify(pool.rounds), draw);
+  assert.strictEqual(JSON.stringify(Object.values(sess.games).map(g => [g.t1, g.t2])), teams);
+  assert.strictEqual(sess.status, "live");
+});
+
 console.log(`${passed} passed`);

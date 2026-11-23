@@ -311,6 +311,16 @@ class Store:
         for pool in sess["pools"]:
             pool["confirmed"] = 0
 
+    def do_session_reset(self, a, org):
+        """Back to a fresh start for the same draw: no scores, every pool on round 1."""
+        sess = self._session(a.get("sid"), "live")
+        for g in sess["games"].values():
+            g.update(s1=None, s2=None, status="pending")
+            g.pop("at", None)
+        for pool in sess["pools"]:
+            pool["confirmed"] = 0
+        return dict(games=len(sess["games"]))
+
     def do_session_delete(self, a, org):
         sess = self._session(a.get("sid"), "setup", "live")
         if self._done(sess):

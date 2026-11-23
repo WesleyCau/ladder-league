@@ -160,6 +160,26 @@ class StoreTest(unittest.TestCase):
         again = Store(self.tmp.name)
         self.assertEqual(again.state["ratings"]["current"], st.state["ratings"]["current"])
 
+    def test_reset_session(self):
+        st = self.store
+        sid = st.apply("session.create", dict(date="2026-11-23"), org=True)["id"]
+        sess = st.state["sessions"][-1]
+        st.apply("session.assign", dict(sid=sid), org=True)
+        st.apply("session.start", dict(sid=sid), org=True)
+        pool = sess["pools"][0]
+        draw = json.dumps(pool["rounds"])
+        for gid in pool["rounds"][0]:
+            st.apply("game.score", dict(sid=sid, gid=gid, s1=11, s2=5), org=False)
+        st.apply("round.confirm", dict(sid=sid, pool=pool["id"], round=0), org=False)
+        with self.assertRaises(ActionError) as cm:
+            st.apply("session.reset", dict(sid=sid), org=False)
+        self.assertEqual(cm.exception.code, "pin")
+        st.apply("session.reset", dict(sid=sid), org=True)
+        self.assertTrue(all(g["status"] == "pending" and g["s1"] is None and "at" not in g for g in sess["games"].values()))
+        self.assertEqual([p["confirmed"] for p in sess["pools"]], [0] * len(sess["pools"]))
+        self.assertEqual(json.dumps(pool["rounds"]), draw)
+        self.assertEqual(sess["status"], "live")
+
     def test_substitute_and_dropout(self):
         st = self.store
         sid = st.apply("session.create", dict(date="2026-11-23"), org=True)["id"]
