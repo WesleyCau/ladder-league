@@ -20,6 +20,7 @@ const app = {
   tab: "ratings",
   hl: null,          // players highlighted on the ratings chart: [{ id, slot }]
   chart: null,       // geometry of the chart on screen, for hover and tap
+  hf: "all",         // which starting level's lines the history chart shows
 };
 
 /* ---------- backend ---------- */
@@ -271,27 +272,103 @@ function viewBoard() {
 function viewStandings() {
   const closed = closedSess(), last = closed[closed.length - 1], s = openSess();
   const live = s && s.status === "live" ? s : null, shown = live || last;
-  const tab = app.tab === "session" && shown ? "session" : "ratings";
-  const lastRec = last ? app.st.ratings.sessions[last.id] || {} : {};
-  const ids = Object.keys(app.st.players).sort((a, b) => rating(b) - rating(a) || nm(a).localeCompare(nm(b)));
-  const hist = tab === "ratings" ? ratingHistory() : null, charted = new Set(hist ? hist.series.map(x => x.id) : []);
-  const slot = Object.fromEntries((hist ? hlList(hist) : []).map(h => [h.id, h.slot]));
-  const ratings = `${hist ? ratingChart(hist) : ""}<div class="card"><div class="scroll"><table>
-    <thead><tr><th>#</th><th>Player</th><th class="r">Rating</th><th class="r">Last week</th><th class="r">W-L</th></tr></thead>
-    <tbody>${ids.map((id, i) => {
-      const t = app.st.ratings.totals[id] || { w: 0, l: 0 }, rec = lastRec[id], ch = rec ? rec.end - rec.start : null;
-      return `<tr class="${P(id).active ? "" : "off"}${charted.has(id) ? " pickable" : ""}" ${charted.has(id) ? `data-act="hl" data-pid="${id}"` : ""}><td>${i + 1}</td><td>${slot[id] ? `<i class="sw" style="background:var(--s${slot[id]})"></i>` : ""}${esc(nm(id))}${P(id).active ? "" : "<small>dropped out</small>"}</td>
-        <td class="r"><b>${fmt(rating(id))}</b></td><td class="r">${ch === null ? '<span class="muted">did not play</span>' : `<span class="${ch < 0 ? "dn" : "up"}">${sgn(ch)}</span>`}</td><td class="r">${t.w}-${t.l}</td></tr>`;
-    }).join("")}</tbody></table></div></div>
-    <p class="muted">Ratings update when the organiser finishes a session. Every game in a session counts the same, whatever order it was played in.</p>`;
+  const hist = ratingHistory(), hasHist = hist.labels.length > 1 && hist.series.length > 0;
+  const tab = app.tab === "session" && shown ? "session" : app.tab === "history" && hasHist ? "history" : "ratings";
   const session = shown ? `<p class="muted">${niceDate(shown.date)}${live ? ", live" : ""}</p>
     <div class="pools">${shown.pools.map(p => `<div class="card"><h2>${esc(p.name)}</h2>${standingsTable(shown, p)}</div>`).join("")}</div>` : "";
   return `<div class="head"><h1>Standings</h1></div>
     <div class="seg" role="group" aria-label="View">
-      <button data-act="tab" data-tab="ratings" aria-pressed="${tab === "ratings"}">League ratings</button>
+      <button data-act="tab" data-tab="ratings" aria-pressed="${tab === "ratings"}">Ratings</button>
+      ${hasHist ? `<button data-act="tab" data-tab="history" aria-pressed="${tab === "history"}">History</button>` : ""}
       ${shown ? `<button data-act="tab" data-tab="session" aria-pressed="${tab === "session"}">${live ? "Tonight" : "Last session"}</button>` : ""}
     </div>
-    ${tab === "ratings" ? ratings : session}`;
+    ${tab === "ratings" ? ratingBoard(last, hist) : tab === "history" ? historyView(hist) : session}`;
+}
+
+/* ---------- Rating board ---------- */
+/* Which starting level a player was seeded at: 0 is the top pool's seed. */
+function seedLevel(id) {
+  const seeds = app.st.league.seeds, v = P(id).seed;
+  let k = 0;
+  seeds.forEach((x, i) => { if (Math.abs(x - v) < Math.abs(seeds[k] - v)) k = i; });
+  return k;
+}
+const levelName = k => "Pool " + String.fromCharCode(65 + k);
+/* Every player on one scale: a tick where they were seeded, a dot where they are now. */
+function ratingBoard(last, hist) {
+  const ids = Object.keys(app.st.players).sort((a, b) => rating(b) - rating(a) || nm(a).localeCompare(nm(b)));
+  if (!ids.length) return '<p class="muted">No players yet.</p>';
+  const seeds = app.st.league.seeds, lastRec = last ? app.st.ratings.sessions[last.id] || {} : {}, charted = new Set(hist.series.map(x => x.id));
+  const vals = ids.flatMap(id => [rating(id), P(id).seed]);
+  const lo = Math.floor((Math.min(...vals) - 40) / 100) * 100, hi = Math.ceil((Math.max(...vals) + 40) / 100) * 100;
+  const pos = v => ((v - lo) / (hi - lo) * 100).toFixed(2) + "%", ticks = [];
+  for (let t = lo + 100; t < hi; t += 100) if ((t - seeds[0]) % 200 === 0) ticks.push(t);
+  const grid = ticks.map(t => `<i class="gl" style="left:${pos(t)}"></i>`).join("");
+  const games = closedSess().reduce((n, x) => n + Object.values(x.games).filter(g => g.status === "done").length, 0);
+  const poolOf = id => { const p = last && last.pools.find(q => q.players.includes(id)); return p ? p.name : ""; };
+  return `<p class="muted">All ${ids.length} players after ${games} games. The tick marks where a player was seeded and the dot is their rating now, so the line between them is how far they have moved.${charted.size ? " Tap a player for their history." : ""}</p>
+    <div class="card"><div class="blegend">${seeds.map((x, i) => `<span class="lv${Math.min(3, i)}"><i class="psw"></i>${levelName(i)} start (${(x / 1000).toFixed(1)})</span>`).join("")}<span><i class="tk"></i>Seed</span></div>
+    <ol class="lboard">
+      <li class="lrow head" aria-hidden="true"><span class="l-rk">#</span><span class="l-nm">Player</span><span class="trk ax">${ticks.map(t => `<span style="left:${pos(t)}">${(t / 1000).toFixed(1)}</span>`).join("")}</span><span class="l-rt">Rating</span><span class="l-ch">Last week</span></li>
+      ${ids.map((id, i) => {
+        const pl = P(id), r = rating(id), a = Math.min(pl.seed, r), b = Math.max(pl.seed, r), t = app.st.ratings.totals[id] || { w: 0, l: 0 }, rec = lastRec[id], ch = rec ? rec.end - rec.start : null;
+        const where = !pl.active ? "dropped out" : rec ? `${esc(poolOf(id) || "played")} last week` : last ? (t.w + t.l ? "missed last week" : "yet to play") : "yet to play";
+        return `<li class="lrow lv${Math.min(3, seedLevel(id))}${pl.active ? "" : " off"}${charted.has(id) ? " pickable" : ""}" ${charted.has(id) ? `data-act="history" data-pid="${id}"` : ""}>
+          <span class="l-rk">${i + 1}</span>
+          <span class="l-nm"><b>${esc(nm(id))}</b><small><i class="psw"></i>${t.w}-${t.l} · ${where}</small></span>
+          <span class="trk">${grid}<i class="cn" style="left:${pos(a)};width:${((b - a) / (hi - lo) * 100).toFixed(2)}%"></i><i class="sd" style="left:${pos(pl.seed)}"></i><i class="dt" style="left:${pos(r)}"></i></span>
+          <span class="l-rt">${fmt(r)}</span>
+          <span class="l-ch">${ch === null ? "" : `<span class="${ch < 0 ? "dn" : "up"}">${sgn(ch)}</span>`}</span></li>`;
+      }).join("")}
+    </ol></div>
+    <p class="muted">Ratings update when the organiser finishes a session. Every game in a session counts the same, whatever order it was played in.</p>`;
+}
+
+/* ---------- Rating history ---------- */
+function historyView(hist) {
+  const n = hist.labels.length, closed = closedSess(), recs = app.st.ratings.sessions;
+  const picked = hlList(hist), byId = Object.fromEntries(hist.series.map(x => [x.id, x]));
+  const best = fn => hist.series.reduce((m, x) => (m === null || fn(x) > fn(m) ? x : m), null);
+  const total = x => x.vals[n - 1] - x.vals[0], lastMove = x => (x.played[n - 1] ? x.vals[n - 1] - x.vals[n - 2] : -1e9);
+  const tile = (k, x, v, note) => (x ? `<button class="kpi" data-act="history" data-pid="${x.id}"><span class="k">${k}</span><b class="v num">${v}</b><span class="d">${esc(nm(x.id))}</span><span class="n">${note}</span></button>` : "");
+  const top = best(x => x.vals[n - 1]), climb = best(total), fall = best(x => -total(x)), week = best(lastMove), weekDown = best(x => (x.played[n - 1] ? x.vals[n - 2] - x.vals[n - 1] : -1e9));
+  const levels = [...new Set(hist.series.map(x => seedLevel(x.id)))].sort();
+  const lv = app.hf === "all" || !levels.includes(+app.hf) ? "all" : +app.hf;
+  const others = hist.series.filter(x => !picked.some(h => h.id === x.id)).sort((a, b) => nm(a.id).localeCompare(nm(b.id)));
+  return `<div class="kpis">
+      ${tile("Top rating", top, fmt(top.vals[n - 1]), "now")}
+      ${tile("Biggest climb", climb, sgn(total(climb)), "since seeding")}
+      ${tile("Biggest fall", fall, sgn(total(fall)), "since seeding")}
+      ${tile("Best night", week, sgn(week.vals[n - 1] - week.vals[n - 2]), esc(hist.labels[n - 1]))}
+      ${tile("Toughest night", weekDown, sgn(weekDown.vals[n - 1] - weekDown.vals[n - 2]), esc(hist.labels[n - 1]))}
+    </div>
+    <div class="card chartcard"><div class="row spread"><h2>Rating after each session</h2>
+        <span class="row"><span class="muted small">Started in</span><span class="seg slim" role="group" aria-label="Lines shown, by starting pool">${[["all", "All"]].concat(levels.map(k => [k, levelName(k)])).map(([k, l]) => `<button data-act="hfilter" data-lv="${k}" aria-pressed="${String(lv) === String(k)}">${l}</button>`).join("")}</span></span></div>
+      <div class="legend">${picked.map(h => `<button class="lg" data-act="hl" data-pid="${h.id}" aria-label="Remove ${esc(nm(h.id))}"><i class="sw" style="background:var(--s${h.slot})"></i>${esc(sn(h.id))}<b>${fmt(rating(h.id))}</b><span aria-hidden="true">✕</span></button>`).join("")}
+        <select id="hladd" class="lgadd" aria-label="Highlight a player"><option value="">${picked.length ? "Add a player" : "Highlight a player"}</option>${others.map(x => `<option value="${x.id}">${esc(nm(x.id))}</option>`).join("")}</select></div>
+      ${ratingChart(hist, lv)}
+      <p class="muted small">Grey lines are everyone else. Tap a line or use the list to highlight up to four players. A hollow dot is a week not played, so the rating carries over.</p></div>
+    ${picked.length ? `<div class="pcards">${picked.slice().sort((a, b) => rating(b.id) - rating(a.id)).map(h => {
+      const x = byId[h.id], t = app.st.ratings.totals[h.id] || { w: 0, l: 0 };
+      return `<div class="card pcard"><h3><i class="sw" style="background:var(--s${h.slot})"></i>${esc(nm(h.id))}<b class="num">${fmt(x.vals[n - 1])}</b></h3>
+        <p class="muted small">Seeded ${fmt(x.vals[0])} · ${sgn(total(x))} since · ${t.w}-${t.l} overall</p>
+        <div class="scroll"><table><thead><tr><th>Session</th><th>Pool</th><th class="r">W-L</th><th class="r">Points</th><th class="r">Change</th><th class="r">Rating</th></tr></thead><tbody>
+          ${closed.map((c, i) => {
+            const r = (recs[c.id] || {})[h.id], pool = r && c.pools.find(q => q.id === r.pool);
+            return r ? `<tr><td>${esc(hist.labels[i + 1])}</td><td>${esc(pool ? pool.name : r.pool || "")}</td><td class="r">${r.w}-${r.l}</td><td class="r">${r.pf}-${r.pa}</td><td class="r"><span class="${r.end < r.start ? "dn" : "up"}">${sgn(r.end - r.start)}</span></td><td class="r"><b>${fmt(r.end)}</b></td></tr>`
+              : `<tr class="off"><td>${esc(hist.labels[i + 1])}</td><td colspan="4">did not play</td><td class="r">${fmt(x.vals[i + 1])}</td></tr>`;
+          }).join("")}</tbody></table></div></div>`;
+    }).join("")}</div>` : ""}`;
+}
+/* Highlight a player (keeping the others) and open their history. */
+function addHl(pid) {
+  const list = app.hl || [];
+  if (!list.some(h => h.id === pid)) {
+    const gone = list.length >= 4 ? list.shift() : null, used = new Set(list.map(h => h.slot));
+    list.push({ id: pid, slot: gone ? gone.slot : [1, 2, 3, 4].find(k => !used.has(k)) });
+  }
+  app.hl = list; app.tab = "history";
+  render();
 }
 
 /* ---------- Ratings chart ---------- */
@@ -324,33 +401,32 @@ function toggleHl(pid) {
   app.hl = list;
   render();
 }
-function ratingChart(hist) {
-  const n = hist.labels.length;
-  if (n < 2 || !hist.series.length) return "";
-  const W = Math.max(280, Math.min(1400, document.documentElement.clientWidth) - 54), narrow = W < 560, H = narrow ? 300 : 380;
+function ratingChart(hist, lv) {
+  const n = hist.labels.length, picked = hlList(hist), slot = Object.fromEntries(picked.map(h => [h.id, h.slot]));
+  const shown = hist.series.filter(x => slot[x.id] || lv === "all" || seedLevel(x.id) === lv);
+  const W = Math.max(280, Math.min(1400, document.documentElement.clientWidth) - 54), narrow = W < 560, H = narrow ? 320 : 440;
   const m = { l: 40, r: narrow ? 112 : 132, t: 12, b: 28 };
-  const all = hist.series.flatMap(x => x.vals), lo = Math.floor((Math.min(...all) - 15) / 100) * 100, hi = Math.ceil((Math.max(...all) + 15) / 100) * 100;
+  const all = shown.flatMap(x => x.vals), lo = Math.floor((Math.min(...all) - 15) / 100) * 100, hi = Math.ceil((Math.max(...all) + 15) / 100) * 100;
   const X = i => m.l + (W - m.l - m.r) * i / (n - 1), Y = v => m.t + (H - m.t - m.b) * (hi - v) / (hi - lo), f = v => v.toFixed(1);
   const step = hi - lo > 900 ? 200 : 100, ticks = [];
   for (let v = lo; v <= hi; v += step) ticks.push(v);
-  const picked = hlList(hist), slot = Object.fromEntries(picked.map(h => [h.id, h.slot]));
   const path = x => x.vals.map((v, i) => `${i ? "L" : "M"}${f(X(i))} ${f(Y(v))}`).join("");
   const byId = Object.fromEntries(hist.series.map(x => [x.id, x]));
   /* direct labels at the line ends, pushed apart so they never overlap */
   const ends = picked.map(h => ({ h, y: Y(byId[h.id].vals[n - 1]) })).sort((a, b) => a.y - b.y);
   ends.forEach((e, i) => { e.ly = i ? Math.max(e.y, ends[i - 1].ly + 19) : e.y; });
   for (let i = ends.length - 1; i >= 0; i--) { const cap = i === ends.length - 1 ? H - m.b : ends[i + 1].ly - 19; if (ends[i].ly > cap) ends[i].ly = cap; }
-  app.chart = { xs: hist.labels.map((_, i) => X(i)), lo, hi, top: m.t, bottom: H - m.b, hist };
-  return `<div class="card chartcard"><div class="row spread"><h2>Rating after each session</h2><span class="muted small">Tap a player or a line to highlight, up to four</span></div>
-    <div class="legend">${picked.length ? picked.map(h => `<button class="lg" data-act="hl" data-pid="${h.id}" aria-label="Remove ${esc(nm(h.id))}"><i class="sw" style="background:var(--s${h.slot})"></i>${esc(sn(h.id))}<b>${fmt(rating(h.id))}</b><span aria-hidden="true">✕</span></button>`).join("") : '<span class="muted">No player highlighted.</span>'}</div>
-    <div class="chartbox"><svg class="rchart" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Line chart of every player's rating after each session. The table below has the same numbers.">
+  app.chart = { xs: hist.labels.map((_, i) => X(i)), lo, hi, top: m.t, bottom: H - m.b, hist: { labels: hist.labels, series: shown } };
+  return `<div class="chartbox"><svg class="rchart" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Line chart of every player's rating after each session. The highlighted players' numbers are in the tables below.">
       ${ticks.map(v => `<line class="grid" x1="${m.l}" x2="${W - m.r}" y1="${f(Y(v))}" y2="${f(Y(v))}"/><text class="ax" x="${m.l - 8}" y="${f(Y(v) + 4)}" text-anchor="end">${(v / 1000).toFixed(1)}</text>`).join("")}
       ${hist.labels.map((l, i) => `<text class="ax" x="${f(X(i))}" y="${H - 8}" text-anchor="${i === 0 ? "start" : "middle"}">${esc(l)}</text>`).join("")}
       <line class="xh" x1="0" x2="0" y1="${m.t}" y2="${H - m.b}" visibility="hidden"/>
-      ${hist.series.filter(x => !slot[x.id]).map(x => `<path class="ln" d="${path(x)}"/>`).join("")}
-      ${picked.map(h => `<path class="ln on" style="stroke:var(--s${h.slot})" d="${path(byId[h.id])}"/>${byId[h.id].vals.map((v, i) => `<circle class="pt" style="fill:var(--s${h.slot})" cx="${f(X(i))}" cy="${f(Y(v))}" r="4.5"/>`).join("")}`).join("")}
+      ${shown.filter(x => !slot[x.id]).map(x => `<path class="ln" d="${path(x)}"/>`).join("")}
+      ${picked.map(h => `<path class="ln on" style="stroke:var(--s${h.slot})" d="${path(byId[h.id])}"/>${byId[h.id].vals.map((v, i) => (i === 0 || byId[h.id].played[i]
+        ? `<circle class="pt" style="fill:var(--s${h.slot})" cx="${f(X(i))}" cy="${f(Y(v))}" r="4.5"/>`
+        : `<circle class="pt miss" style="stroke:var(--s${h.slot})" cx="${f(X(i))}" cy="${f(Y(v))}" r="4"/>`)).join("")}`).join("")}
       ${ends.map(e => `${Math.abs(e.ly - e.y) > 3 ? `<line class="lead" x1="${f(X(n - 1) + 6)}" y1="${f(e.y)}" x2="${f(X(n - 1) + 11)}" y2="${f(e.ly)}"/>` : ""}<text class="el" x="${f(X(n - 1) + 14)}" y="${f(e.ly + 5)}">${esc(sn(e.h.id))} <tspan class="ev">${fmt(byId[e.h.id].vals[n - 1])}</tspan></text>`).join("")}
-    </svg><div class="tip" hidden></div></div></div>`;
+    </svg><div class="tip" hidden></div></div>`;
 }
 /* Hover and tap on the chart: a crosshair at the nearest session, the highlighted players' ratings there, and the line under the pointer. */
 function chartProbe(e) {
@@ -663,6 +739,8 @@ const A = {
   nameStyle: d => act("league", "league.update", { nameStyle: d.style }),
   tab: d => { app.tab = d.tab; render(); },
   hl: d => toggleHl(d.pid),
+  history: d => { addHl(d.pid); window.scrollTo(0, 0); },
+  hfilter: d => { app.hf = d.lv; render(); },
   lock: async () => { await app.be.signOut(); app.form.password = ""; render(); },
   export: () => {
     const a = document.createElement("a");
@@ -758,6 +836,7 @@ document.addEventListener("change", async e => {
     } catch (err) { app.importDoc = null; app.err.data = "That file is not a league file saved from this app."; }
     return render();
   }
+  if (e.target.id === "hladd") { if (e.target.value) addHl(e.target.value); return; }
   if (e.target.id) app.form[e.target.id] = e.target.value;
 });
 document.addEventListener("keydown", e => { if (e.key === "Escape" && app.flow) { app.flow = null; render(); } });

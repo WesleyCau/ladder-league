@@ -24,11 +24,14 @@ class EngineTest(unittest.TestCase):
         with open(os.path.join(importer.SOURCE, "ratings.csv"), encoding="utf-8") as f:
             expected = {r["Player"]: int(round(float(r["DUPR"]) * 1000)) for r in csv.DictReader(f)}
         got = {p["name"]: state["ratings"]["current"][pid] for pid, p in state["players"].items()}
-        self.assertEqual(len(got), 35)
+        self.assertEqual(len(got), len(expected))
+        self.assertGreaterEqual(len(got), 35)
         self.assertEqual(got, expected)
         totals = state["ratings"]["totals"]
         self.assertEqual(sum(t["w"] for t in totals.values()), sum(t["l"] for t in totals.values()))
-        self.assertEqual(sum(t["w"] for t in totals.values()), 109 * 2)
+        with open(os.path.join(importer.SOURCE, "games.csv"), encoding="utf-8") as f:
+            games = sum(1 for _ in csv.DictReader(f))
+        self.assertEqual(sum(t["w"] for t in totals.values()), games * 2)
 
 
 class SchedulerTest(unittest.TestCase):
