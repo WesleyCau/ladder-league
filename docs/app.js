@@ -50,10 +50,10 @@ async function boot() {
   app.be = await Backends.pick(accept, setOnline);
   app.be.start();
 }
-function toast(msg) {
+function toast(msg, ms) {
   const t = $("#toast");
   t.textContent = msg; t.classList.add("show");
-  clearTimeout(toast.timer); toast.timer = setTimeout(() => t.classList.remove("show"), 2200);
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => t.classList.remove("show"), ms || 2200);
 }
 const inFlight = new Set();
 async function act(area, type, args, okMsg) {
@@ -131,14 +131,18 @@ function poolTable(s, pool) {
 
 /* ---------- full screen (All courts on the tablet) ---------- */
 const fsOn = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
-const fsCan = () => { const d = document.documentElement; return !!(d.requestFullscreen || d.webkitRequestFullscreen); };
+/* iPads and iPhones do have a full screen mode, but Safari treats a run of taps in it (the score keypad) as typing on a
+     fake keyboard: it throws the page out of full screen with a warning about being tricked. So it is not used there. */
+const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+const isHomeScreenApp = () => navigator.standalone === true || (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
+const fsCan = () => { const d = document.documentElement; return !isIOS() && !!(d.requestFullscreen || d.webkitRequestFullscreen); };
 /* Some tablets (iPads in particular, outside Safari) give web pages no full screen. There the button hides this app's
    own menus instead, which is the most a page can do, and says how to get the real thing. */
 function fsToggle() {
   const d = document.documentElement;
   if (!fsCan()) {
     app.kiosk = !app.kiosk;
-    if (app.kiosk) toast("This browser cannot go fully full screen, so the menus are hidden instead.");
+    if (app.kiosk && !isHomeScreenApp()) toast(isIOS() ? "On an iPad, full screen blocks tapping in scores, so the menus are hidden instead. For a true full screen: Share, then Add to Home Screen." : "This browser cannot go fully full screen, so the menus are hidden instead.", 8000);
     return render();
   }
   try {
@@ -154,7 +158,7 @@ function shell(body) {
   const kiosk = app.kiosk && route === "board";
   document.body.classList.toggle("kiosk", !!kiosk);
   return `
-  ${kiosk ? `<div class="kbar"><span>${esc(app.st.league.name)}</span><button data-act="fullscreen">Show menus ✕</button><span></span></div>` : ""}
+  ${kiosk ? `<div class="kbar"><span>${esc(app.st.league.name)}</span><button data-act="fullscreen">Show menus ✕</button><span class="ktip">${isIOS() && !isHomeScreenApp() ? "True full screen: Share, Add to Home Screen" : ""}</span></div>` : ""}
   <header class="top"><div class="top-in">
     <div class="top-l"><div class="brand">${esc(app.st.league.name)}</div>${s && s.status === "live" ? '<span class="live-dot">Live</span>' : ""}</div>
     <div class="top-c">${route === "board" ? `<button class="fsbtn" data-act="fullscreen">${fsOn() ? "Exit full screen" : "Full screen"}</button>` : ""}</div>

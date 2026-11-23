@@ -53,6 +53,7 @@ button { cursor: pointer; }
 body.kiosk .top, body.kiosk .nav { display: none; }
 body.kiosk { padding-bottom: 0; }
 .kbar { background: var(--chrome); color: var(--on-chrome-2); display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 12px; padding: 2px 12px; font-size: 13px; font-weight: 650; border-bottom: 3px solid; border-image: var(--grad) 1; }
+.kbar .ktip { text-align: right; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .kbar button { border: 0; background: transparent; color: var(--on-chrome); font: inherit; font-weight: 750; min-height: 30px; padding: 2px 6px; }
 .offline { background: var(--bad); color: #fff; text-align: center; padding: 8px 16px; font-weight: 600; }
 .demo { background: var(--soft); color: var(--ink); text-align: center; padding: 6px 16px; font-weight: 600; font-size: 14px; border-bottom: 1px solid var(--line); }
