@@ -56,8 +56,6 @@ button { cursor: pointer; }
 .brand { font-weight: 750; font-size: 16px; letter-spacing: .01em; flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap: 10px; }
 .brand::before { content: ""; width: 14px; height: 14px; border-radius: 50%; background: var(--grad); flex: none; }
 .live-dot { display: inline-flex; align-items: center; background: var(--grad); color: var(--on-brand); font-weight: 800; font-size: 12px; padding: 3px 10px; border-radius: 99px; text-transform: uppercase; letter-spacing: .08em; }
-/* iPad full screen: the status bar and Safari's own close button sit over the top left of the page, so the bar makes room for them */
-html.ios:-webkit-full-screen .top-in { padding-top: max(26px, calc(4px + env(safe-area-inset-top, 0px))); padding-left: 68px; }
 .fsbtn { border: 1px solid rgba(255, 255, 255, .4); background: transparent; color: var(--on-chrome); border-radius: 10px; min-height: 40px; padding: 6px 14px; font: inherit; font-size: 14px; font-weight: 700; white-space: nowrap; }
 .fsbtn:active { background: rgba(255, 255, 255, .16); }
 .fsbtn:focus-visible { outline: 3px solid var(--brand); outline-offset: 2px; }

@@ -133,7 +133,9 @@ function poolTable(s, pool) {
 const fsOn = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
 const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 const isHomeScreenApp = () => navigator.standalone === true || (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
-const fsCan = () => { const d = document.documentElement; return !isHomeScreenApp() && !!(d.requestFullscreen || d.webkitRequestFullscreen); };
+/* No button on iPads and iPhones: Safari's full screen there interrupts score entry with a warning about typing, puts its own
+   close button over the page and stops responding after a scroll. Opened from a Home Screen icon the app already fills the screen. */
+const fsCan = () => { const d = document.documentElement; return !isIOS() && !isHomeScreenApp() && !!(d.requestFullscreen || d.webkitRequestFullscreen); };
 function fsEnter() {
   const d = document.documentElement;
   try { const p = (d.requestFullscreen || d.webkitRequestFullscreen).call(d); if (p && p.catch) p.catch(() => {}); } catch (e) { /* the browser said no: stay as we are */ }
@@ -142,10 +144,6 @@ function fsExit() {
   try { const p = (document.exitFullscreen || document.webkitExitFullscreen).call(document); if (p && p.catch) p.catch(() => {}); } catch (e) { /* already out */ }
 }
 const fsToggle = () => (fsOn() ? fsExit() : fsEnter());
-/* Safari on an iPad reads the quick taps of score entry in full screen as typing on a fake keyboard and interrupts with a
-   warning. So on an iPad the score screen steps out of full screen, and the tap that finishes it (Save, close) steps back in. */
-function fsPauseForScore() { if (isIOS() && fsOn()) { app.fsBack = true; fsExit(); } }
-function fsResume() { if (app.fsBack) { app.fsBack = false; fsEnter(); } }
 /* All courts fills the height of the screen: whatever is spare below the lowest pool is shared out as space around the names. */
 function fillBoard() {
   const board = $(".board");
@@ -940,7 +938,6 @@ function render() {
   if (!up && overlayUp && history.state && history.state.overlay) { overlayLeaving = true; history.back(); }
   overlayUp = up;
   document.title = app.st.league.name;
-  if (!app.flow) app.fsBack = false;
   fillBoard();
   if (focused && !app.flow) {
     const el = document.getElementById(focused);
@@ -950,8 +947,8 @@ function render() {
 
 /* ---------- actions ---------- */
 const A = {
-  flow: d => { fsPauseForScore(); openFlow(d.sid, d.gid); },
-  fclose: () => { fsResume(); app.flow = null; render(); },
+  flow: d => openFlow(d.sid, d.gid),
+  fclose: () => { app.flow = null; render(); },
   fwin: d => { const f = app.flow; f.win = +d.win; f.ws = f.pts; f.ls = null; f.sure = false; f.step = "score"; render(); },
   fscore: d => { const f = app.flow; f.ls = +d.ls; f.ws = f.pts; f.step = "confirm"; render(); },
   fother: () => { const f = app.flow; f.ws = f.pts - 1; f.ls = Math.max(0, f.pts - 2); f.step = "other"; render(); },
@@ -961,7 +958,6 @@ const A = {
   fkeep: () => { app.flow.sure = false; render(); },
   fsave: async d => {
     const f = app.flow; if (f.busy) return;
-    fsResume();
     f.busy = true; f.err = ""; render();
     const s1 = f.win === 1 ? f.ws : f.ls, s2 = f.win === 1 ? f.ls : f.ws, args = { sid: f.sid, gid: f.gid, s1, s2, replace: !!d.replace || !!f.was };
     if (f.was) args.was = f.was;
@@ -978,7 +974,6 @@ const A = {
   fclear: async () => {
     const f = app.flow;
     if (!f.sure) { f.sure = true; return render(); }
-    fsResume();
     const args = { sid: f.sid, gid: f.gid };
     if (f.hist) args.history = true;
     const j = await send("game.clear", args);
@@ -1184,7 +1179,6 @@ function fsChanged() {
 }
 document.addEventListener("fullscreenchange", fsChanged);
 document.addEventListener("webkitfullscreenchange", fsChanged);
-document.documentElement.classList.toggle("ios", isIOS());
 window.addEventListener("popstate", () => {
   overlayLeaving = false;
   if (app.flow || app.dialog) { app.flow = null; app.dialog = null; render(); }      // Back pressed with a screen open: close it
