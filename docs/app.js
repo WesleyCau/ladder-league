@@ -168,15 +168,12 @@ function boardCard(s, g, label) {
   return `<div class="bmatch ${done ? "is-done" : skipped ? "is-skipped" : "is-live"}">${names(g.t1, w1, 1)}
     <div class="mid"><span class="vsl"><i>vs</i>${label ? `<b>${label}</b>` : ""}</span></div>${names(g.t2, w2, 3)}${right}</div>`;
 }
-/* Three looks for the All courts cards, chosen per device while they are being compared. */
-const BOARD_STYLES = { 1: "A. Open", 2: "B. Band", 3: "C. Tall" };
-function boardStyle() { let v = "1"; try { v = localStorage.getItem("ladder-board-style") || "1"; } catch (e) { /* storage blocked */ } return BOARD_STYLES[v] ? v : "1"; }
-/* Width of the widest name in a layout's own typeface, in ems, measured in the page so any font works. */
-function boardNameEm(style, names) {
-  const key = "bn" + style + names.join("|");
+/* Width of the widest name as the board draws it, in ems, measured in the page so it follows the stylesheet. */
+function boardNameEm(names) {
+  const key = "bn" + names.join("|");
   if (!emCache.has(key)) {
     const host = document.createElement("div");
-    host.className = "board bs-" + style;
+    host.className = "board";
     host.style.cssText = "position:absolute;left:-9999px;top:0;visibility:hidden;width:4000px";
     host.innerHTML = `<div class="bmatch"><div class="names" style="font-size:100px;display:block;white-space:nowrap">${names.map(n => `<span style="display:inline-block">${esc(n)}</span>`).join("<br>")}</div></div>`;
     document.body.appendChild(host);
@@ -203,12 +200,12 @@ function emWidth(text, weight) {
   }
   return emCache.get(key);
 }
-function fit(s, style) {
+function fit(s) {
   const vw = document.documentElement.clientWidth, n = s.pools.length;
   if (vw < 900 || !n) return "";
   const col = (Math.min(1400, vw) - 24 - 10 * (n - 1)) / n, cap = (lo, v, hi) => Math.max(lo, Math.min(hi, Math.floor(v * 10) / 10));
   const names = [...new Set(s.pools.flatMap(p => p.players).concat(Object.values(s.games).flatMap(g => g.t1.concat(g.t2))))].map(sn), pairs = Object.values(s.games).flatMap(g => [g.t1, g.t2]).map(t => t.map(sn).join(" / "));
-  const name = boardNameEm(style || boardStyle(), names), pair = Math.max(...pairs.map(x => emWidth(x, 700)));
+  const name = boardNameEm(names), pair = Math.max(...pairs.map(x => emWidth(x, 700)));
   const pts = Math.min(76, Math.max(54, vw * 0.055));      // the score column, the same clamp as --ptsw in the stylesheet
   const colB = (Math.min(1400, vw) - 12 - 6 * (n - 1)) / n;      // the board runs closer to the screen edge, with tighter gaps
   return `--n:${n};--colw:${Math.floor(colB)}px;--fit-name:${cap(16, (colB - 28 - pts) / name, 56)}px;--fit-pair:${cap(13, (colB - 36) / pair, 24)}px;--fit-draw:${cap(12, (col - 68) / pair, 18)}px`;
@@ -320,7 +317,7 @@ function viewBoard() {
   const s = openSess();
   if (!s || s.status !== "live") return `<div class="head"><h1>All courts</h1><p class="muted">No session is live. Current games appear here once the organiser starts one.</p></div>`;
   return `${errLine("court")}
-    <div class="board bs-${boardStyle()}" style="${fit(s)}">${s.pools.map(p => {
+    <div class="board" style="${fit(s)}">${s.pools.map(p => {
       const r = roundInfo(s, p);
       return `<div class="stack">
         <div class="row spread bhead"><h2><a href="#/court/${p.id}">${esc(p.name)}</a></h2><span class="round">${r.finished ? "Finished" : `Round ${r.at + 1} of ${r.total}`}</span></div>
@@ -328,27 +325,7 @@ function viewBoard() {
         ${r.missed ? `<a class="note warn" href="#/court/${p.id}">⚠ ${r.missed === 1 ? "1 earlier game has" : r.missed + " earlier games have"} no score. Tap to enter.</a>` : ""}
         ${nextBox(p, r, true)}${backBlock(s, p, r)}
       </div>`;
-    }).join("")}</div>${boardSwitch()}`;
-}
-
-const boardSwitch = () => `<div class="row bsw"><span class="muted small">Card layout on this device</span>
-  <span class="seg slim" role="group" aria-label="Card layout">${Object.keys(BOARD_STYLES).map(k => `<button data-act="bstyle" data-style="${k}" aria-pressed="${boardStyle() === k}">${BOARD_STYLES[k]}</button>`).join("")}</span>
-  <a class="btn small" href="#/board/options">Compare side by side</a></div>`;
-/* The same two games in each layout, at the size they are on this screen. */
-function viewBoardOptions() {
-  const ids = Object.keys(app.st.players).sort((a, b) => sn(b).length - sn(a).length || nm(a).localeCompare(nm(b))).slice(0, 8);      // longest names: the hardest case
-  if (ids.length < 8) return `<a class="back" href="#/board">‹ All courts</a><p class="muted">Add at least eight players to see the layouts.</p>`;
-  const game = (id, t1, t2, extra) => Object.assign({ id, pool: "A", round: 0, t1, t2, s1: null, s2: null, status: "pending" }, extra);
-  const pool = k => ({ id: String.fromCharCode(65 + k), name: "Pool " + String.fromCharCode(65 + k), courts: 2, confirmed: 0, players: ids, rounds: [["x1", "x2"]] });
-  const s = { id: "sample", status: "live", pools: [0, 1, 2, 3].map(pool), games: { x1: game("x1", [ids[0], ids[5]], [ids[2], ids[7]]), x2: game("x2", [ids[1], ids[4]], [ids[3], ids[6]], { s1: 11, s2: 7, status: "done" }) } };
-  return `<a class="back" href="#/board">‹ All courts</a>
-    <div class="head"><h1>All courts: three layouts</h1><p class="muted">The same two games in each layout, with the longest names in the league, at the size they are on this screen. Choose one to use it on this device.</p></div>
-    <div class="bopts" style="${fit(s, "1")}">${Object.keys(BOARD_STYLES).map(k => `<div class="bopt">
-      <button class="btn ${boardStyle() === k ? "primary" : ""}" data-act="bstyle" data-style="${k}">${BOARD_STYLES[k]}${boardStyle() === k ? " (in use)" : ""}</button>
-      <div class="board bs-${k}" style="${fit(s, k)}"><div class="stack">
-        <div class="row spread bhead"><h2>Pool A</h2><span class="round">Round 1 of 7</span></div>
-        ${boardCard(s, s.games.x1, "Court 1")}${boardCard(s, s.games.x2, "Court 2")}
-        <div class="slot wait">1 score to go</div></div></div></div>`).join("")}</div>`;
+    }).join("")}</div>`;
 }
 
 /* ---------- Standings ---------- */
@@ -921,7 +898,7 @@ function whenSettled(fn) { if (overlayLeaving) afterOverlay.push(fn); else fn();
 function render() {
   if (!app.st) return;
   const [, route, a, b] = location.hash.split("/");
-  const view = route === "court" ? viewCourt((a || "").toUpperCase()) : route === "board" ? (a === "options" ? viewBoardOptions() : viewBoard()) : route === "standings" ? viewStandings() : route === "org" ? viewOrg(a, b) : viewHome();
+  const view = route === "court" ? viewCourt((a || "").toUpperCase()) : route === "board" ? viewBoard() : route === "standings" ? viewStandings() : route === "org" ? viewOrg(a, b) : viewHome();
   const focused = document.activeElement && document.activeElement.id, selStart = focused && document.activeElement.selectionStart;
   $("#app").innerHTML = shell(view);
   $("#overlay").innerHTML = app.flow ? viewFlow() : app.dialog ? viewDialog() : "";
@@ -976,7 +953,6 @@ const A = {
   backRound: d => { app.confirm = null; return act("court", "round.back", { sid: d.sid, pool: d.pool }, "Back one round"); },
   nameStyle: d => act("league", "league.update", { nameStyle: d.style }),
   tab: d => { app.tab = d.tab; render(); },
-  bstyle: d => { try { localStorage.setItem("ladder-board-style", d.style); } catch (e) { /* storage blocked */ } render(); },
   hl: d => togglePlayer(d.pid),
   hon: d => togglePlayer(d.pid, true),
   history: d => { app.hs = { start: [], now: [], custom: true, on: [{ id: d.pid, slot: 1 }] }; app.tab = "history"; render(); window.scrollTo(0, 0); },
