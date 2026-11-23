@@ -465,14 +465,14 @@ function viewPlayer(pid) {
     ${nights.length ? `<div class="card"><h2>Session by session</h2><div class="scroll"><table><thead><tr><th>Session</th><th>Pool</th><th class="r">W-L</th><th class="r">Points</th><th class="r">Change</th><th class="r">Rating</th></tr></thead><tbody>
       <tr class="off"><td>Start</td><td colspan="4">seeded</td><td class="r">${fmt(p.seed)}</td></tr>
       ${closed.map(c => { const r = (recs[c.id] || {})[pid], pool = r && c.pools.find(q => q.id === r.pool);
-        return r ? `<tr><td>${esc(labels[c.id])}</td><td>${esc(pool ? pool.name : "")}</td><td class="r">${r.w}-${r.l}</td><td class="r">${r.pf}-${r.pa}</td><td class="r"><span class="${r.end < r.start ? "dn" : "up"}">${sgn(r.end - r.start)}</span></td><td class="r"><b>${fmt(r.end)}</b></td></tr>`
+        return r ? `<tr><td data-v="${closed.indexOf(c)}">${esc(labels[c.id])}</td><td>${esc(pool ? pool.name : "")}</td><td class="r">${r.w}-${r.l}</td><td class="r">${r.pf}-${r.pa}</td><td class="r"><span class="${r.end < r.start ? "dn" : "up"}">${sgn(r.end - r.start)}</span></td><td class="r"><b>${fmt(r.end)}</b></td></tr>`
           : `<tr class="off"><td>${esc(labels[c.id])}</td><td colspan="5">did not play</td></tr>`; }).join("")}</tbody></table></div></div>` : ""}
     <div class="pools">${people(partners, "Partners", "How this player has done with each partner.")}${people(rivals, "Opponents", "How this player has done against each opponent.")}</div>
     ${bySession.length ? bySession.slice().reverse().map(({ s, rows }) => { const r = (recs[s.id] || {})[pid], won = rows.filter(x => x.won).length;
       return `<div class="card"><div class="row spread"><h2>${s.status === "closed" ? esc(labels[s.id]) : niceDate(s.date) + " (in progress)"} <span class="muted num">${esc(rows[0].pool.name)} · ${won}-${rows.length - won}</span></h2>
           ${r ? `<span class="num"><span class="${r.end < r.start ? "dn" : "up"}">${sgn(r.end - r.start)}</span> to <b>${fmt(r.end)}</b></span>` : '<span class="muted small">not rated until the session is finished</span>'}</div>
         <div class="scroll"><table class="pg"><thead><tr><th>Rd</th><th>Partner</th><th>Opponents</th><th>Result</th><th class="r">Win chance</th><th class="r">Rating</th></tr></thead><tbody>
-          ${rows.map(x => `<tr><td>${x.g.round + 1}</td><td>${x.partner ? plink(x.partner) : ""}</td><td>${x.theirs.map(plink).join(" / ")}</td><td><b class="${x.won ? "wn" : "ls"}">${x.won ? "Won" : "Lost"}</b> ${x.sf}-${x.sa}</td>
+          ${rows.map(x => `<tr><td>${x.g.round + 1}</td><td>${x.partner ? plink(x.partner) : ""}</td><td>${x.theirs.map(plink).join(" / ")}</td><td data-v="${x.sf - x.sa}"><b class="${x.won ? "wn" : "ls"}">${x.won ? "Won" : "Lost"}</b> ${x.sf}-${x.sa}</td>
             <td class="r">${x.prob === null ? "" : pct(x.prob)}</td><td class="r">${x.change === null ? "" : `<span class="${x.change < 0 ? "dn" : "up"}">${sgn(x.change)}</span>`}</td></tr>`).join("")}</tbody></table></div></div>`; }).join("")
       : '<p class="muted">No games played yet.</p>'}
     ${games.some(x => x.prob !== null) ? '<p class="muted small">Win chance is what the ratings gave this pair going into the game, and Rating is what the game was worth, both averaged over every order the night\'s rounds could have been played in.</p>' : ""}`;
@@ -987,6 +987,41 @@ async function dialogRun(type, args, okMsg, backup) {
 }
 
 /* ---------- render ---------- */
+/* ---------- sortable tables: tap a column heading ---------- */
+/* First tap sorts (numbers highest first, names A to Z), second tap reverses, third puts the table back as it was.
+   The choice is remembered per page and table, and re-applied whenever the page redraws. */
+const sortState = {};
+function cellValue(td) {
+  const raw = td.dataset.v != null ? td.dataset.v : td.textContent.trim();
+  const n = parseFloat(raw.replace(/−/g, "-").replace(/[▲▼+%\s]/g, ""));
+  return /^[▲▼\s]*[-−+]?\d/.test(raw) && !isNaN(n) ? n : raw.toLowerCase();
+}
+function sortTables() {
+  document.querySelectorAll("#app table").forEach((table, k) => {
+    const key = location.hash + "|" + app.tab + "|" + k, st = sortState[key], heads = [...table.querySelectorAll("thead th")], body = table.tBodies[0];
+    if (!heads.length || !body) return;
+    table.dataset.sortKey = key;
+    heads.forEach((th, i) => { th.classList.add("sortable"); th.setAttribute("aria-sort", st && st.col === i ? (st.dir > 0 ? "ascending" : "descending") : "none"); });
+    if (!st) return;
+    const rows = [...body.rows], whole = rows.filter(r => r.cells.length === heads.length), partial = rows.filter(r => r.cells.length !== heads.length);
+    whole.map((r, i) => ({ r, i, v: cellValue(r.cells[st.col]) })).sort((a, b) => {
+      const x = a.v, y = b.v, nx = typeof x === "number", ny = typeof y === "number";
+      if (nx !== ny) return nx ? -1 : 1;                                   // numbers first, text (such as "did not play") after
+      return (nx ? x - y : x.localeCompare(y, undefined, { numeric: true })) * st.dir || a.i - b.i;
+    }).forEach(o => body.appendChild(o.r));
+    partial.forEach(r => body.appendChild(r));                              // rows that span columns (did not play) go last
+  });
+}
+function sortBy(th) {
+  const table = th.closest("table"), key = table.dataset.sortKey, col = [...th.parentNode.children].indexOf(th), st = sortState[key];
+  const first = [...table.tBodies[0].rows].find(r => r.cells.length === th.parentNode.children.length);
+  const natural = first && typeof cellValue(first.cells[col]) === "number" ? -1 : 1;
+  if (!st || st.col !== col) sortState[key] = { col, dir: natural };
+  else if (st.dir === natural) st.dir = -natural;
+  else delete sortState[key];
+  render();
+}
+
 let overlayUp = false;      // the score screen and the confirmation screens take one step of browser history, so Back closes them
 let overlayLeaving = false; // that step is being taken back; anything that changes page next waits for it
 const afterOverlay = [];
@@ -1006,6 +1041,7 @@ function render() {
   overlayUp = up;
   document.title = app.st.league.name;
   fillBoard();
+  sortTables();
   if (focused && !app.flow) {
     const el = document.getElementById(focused);
     if (el) { el.focus(); try { if (selStart != null) el.setSelectionRange(selStart, selStart); } catch (e) { /* not a text input */ } }
@@ -1147,6 +1183,8 @@ const FORMS = {
 document.addEventListener("pointermove", chartTip);
 document.addEventListener("click", e => {
   if (drag.suppress) { e.preventDefault(); return; }
+  const th = e.target.closest ? e.target.closest("th.sortable") : null;
+  if (th) return sortBy(th);
   const p = chartProbe(e);
   if (p) { chartTip(e); return; }
   const el = e.target.closest("[data-act]");

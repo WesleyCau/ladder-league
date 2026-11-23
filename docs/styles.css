@@ -203,6 +203,13 @@ label.field { display: flex; flex-direction: column; gap: 4px; font-size: 14px; 
 table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 th { text-align: left; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 6px 8px 6px 0; border-bottom: 1px solid var(--line-2); }
 td { padding: 9px 8px 9px 0; border-bottom: 1px solid var(--line); }
+th.sortable { cursor: pointer; user-select: none; -webkit-user-select: none; white-space: nowrap; }
+th.sortable:hover, th.sortable:active { color: var(--ink); }
+th.sortable::after { content: " ↕"; opacity: .35; }
+th.sortable[aria-sort="ascending"] { color: var(--brand-text); }
+th.sortable[aria-sort="ascending"]::after { content: " ▲"; opacity: 1; }
+th.sortable[aria-sort="descending"] { color: var(--brand-text); }
+th.sortable[aria-sort="descending"]::after { content: " ▼"; opacity: 1; }
 td.r, th.r { text-align: right; padding-right: 0; padding-left: 8px; }
 td small { color: var(--muted); display: block; }
 tr.off td { color: var(--muted); }
