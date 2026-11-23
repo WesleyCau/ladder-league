@@ -75,6 +75,21 @@ const poolGames = (s, pool) => (pool.rounds || []).flat().map(id => s.games[id])
 const team = ids => ids.map(id => `<span>${esc(sn(id))}</span>`).join("");
 const teamLine = ids => ids.map(sn).map(esc).join(" / ");
 const niceDate = d => new Date(d + "T00:00").toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
+const dayMonth = d => new Date(d + "T00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" });
+const todayIso = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+/* The one session every Standings tab talks about: the live one, else the last finished. A session still in setup does not count: its pools are provisional. */
+function standSession() {
+  const s = openSess();
+  return s && s.status === "live" ? s : closedSess().pop() || null;
+}
+/* "tonight" only when it really is tonight, otherwise the date. */
+const sessWhen = s => (s.status === "live" && s.date === todayIso() ? "tonight" : "on " + dayMonth(s.date));
+/* A finished session's label: its day, numbered when two sessions share one. */
+function sessLabels() {
+  const seen = {}, out = {};
+  closedSess().forEach(s => { const d = dayMonth(s.date), k = seen[d] = (seen[d] || 0) + 1; out[s.id] = k > 1 ? `${d} (${k})` : d; });
+  return out;
+}
 const shortDate = d => new Date(d + "T00:00").toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 
 /* Where a pool is up to: the round on court, the one after, and whether the scores are all in. */
@@ -285,8 +300,7 @@ function viewBoard() {
 
 /* ---------- Standings ---------- */
 function viewStandings() {
-  const closed = closedSess(), last = closed[closed.length - 1], s = openSess();
-  const live = s && s.status === "live" ? s : null, shown = live || last;
+  const closed = closedSess(), last = closed[closed.length - 1], shown = standSession(), live = shown && shown.status === "live" ? shown : null;
   const hist = ratingHistory(), hasHist = hist.labels.length > 1 && hist.series.length > 0;
   const tab = app.tab === "session" && shown ? "session" : app.tab === "history" && hasHist ? "history" : "ratings";
   const session = shown ? `<p class="muted">${niceDate(shown.date)}${live ? ", live" : ""}</p>
@@ -295,7 +309,7 @@ function viewStandings() {
     <div class="seg" role="group" aria-label="View">
       <button data-act="tab" data-tab="ratings" aria-pressed="${tab === "ratings"}">Ratings</button>
       ${hasHist ? `<button data-act="tab" data-tab="history" aria-pressed="${tab === "history"}">History</button>` : ""}
-      ${shown ? `<button data-act="tab" data-tab="session" aria-pressed="${tab === "session"}">${live ? "Tonight" : "Last session"}</button>` : ""}
+      ${shown ? `<button data-act="tab" data-tab="session" aria-pressed="${tab === "session"}">${live ? (live.date === todayIso() ? "Tonight" : "Live: " + dayMonth(live.date)) : "Last session"}</button>` : ""}
     </div>
     ${tab === "ratings" ? ratingBoard(last, hist) : tab === "history" ? historyView(hist) : session}`;
 }
@@ -321,13 +335,14 @@ function ratingBoard(last, hist) {
   const grid = ticks.map(t => `<i class="gl" style="left:${pos(t)}"></i>`).join("");
   const games = closedSess().reduce((n, x) => n + Object.values(x.games).filter(g => g.status === "done").length, 0);
   const poolOf = id => { const p = last && last.pools.find(q => q.players.includes(id)); return p ? p.name : ""; };
+  const lastDay = last ? sessLabels()[last.id] : "";
   return `<p class="muted">All ${ids.length} players after ${games} games. The tick marks where a player was seeded and the dot is their rating now, so the line between them is how far they have moved.${charted.size ? " Tap a player for their history." : ""}</p>
     <div class="card"><div class="blegend">${seeds.map((x, i) => `<span class="lv${Math.min(3, i)}"><i class="psw"></i>${levelName(i)} start (${(x / 1000).toFixed(1)})</span>`).join("")}<span><i class="tk"></i>Seed</span></div>
     <ol class="lboard">
-      <li class="lrow head" aria-hidden="true"><span class="l-rk">#</span><span class="l-nm">Player</span><span class="trk ax">${ticks.map(t => `<span style="left:${pos(t)}">${(t / 1000).toFixed(1)}</span>`).join("")}</span><span class="l-rt">Rating</span><span class="l-ch">Last week</span></li>
+      <li class="lrow head" aria-hidden="true"><span class="l-rk">#</span><span class="l-nm">Player</span><span class="trk ax">${ticks.map(t => `<span style="left:${pos(t)}">${(t / 1000).toFixed(1)}</span>`).join("")}</span><span class="l-rt">Rating</span><span class="l-ch">${last ? esc(lastDay) : "Change"}</span></li>
       ${ids.map((id, i) => {
         const pl = P(id), r = rating(id), a = Math.min(pl.seed, r), b = Math.max(pl.seed, r), t = app.st.ratings.totals[id] || { w: 0, l: 0 }, rec = lastRec[id], ch = rec ? rec.end - rec.start : null;
-        const where = !pl.active ? "dropped out" : rec ? `${esc(poolOf(id) || "played")} last week` : last ? (t.w + t.l ? "missed last week" : "yet to play") : "yet to play";
+        const where = !pl.active ? "dropped out" : rec ? `${esc(poolOf(id) || "played")}, ${lastDay}` : last ? (t.w + t.l ? `missed ${lastDay}` : "yet to play") : "yet to play";
         return `<li class="lrow lv${Math.min(3, seedLevel(id))}${pl.active ? "" : " off"}${charted.has(id) ? " pickable" : ""}" ${charted.has(id) ? `data-act="history" data-pid="${id}"` : ""}>
           <span class="l-rk">${i + 1}</span>
           <span class="l-nm"><b>${esc(nm(id))}</b><small><i class="psw"></i>${t.w}-${t.l} · ${where}</small></span>
@@ -343,7 +358,7 @@ function ratingBoard(last, hist) {
 /* Rating after each finished session, per player. A missed week carries the rating forward. */
 function ratingHistory() {
   const closed = closedSess(), recs = app.st.ratings.sessions;
-  const labels = ["Start"].concat(closed.map(s => new Date(s.date + "T00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" })));
+  const names = sessLabels(), labels = ["Start"].concat(closed.map(s => names[s.id]));   // two sessions on one day stay apart
   const series = Object.keys(app.st.players).map(id => {
     let v = P(id).seed, any = false;
     const vals = [v], played = [false];
@@ -352,12 +367,9 @@ function ratingHistory() {
   }).filter(x => x.any);
   return { labels, series };
 }
-/* The pools as they stand now: the open session's once it has pools, else the last finished session's. 0 is Pool A.
+/* The pools as they stand now: the live session's, else the last finished session's. 0 is Pool A.
    A player who was not in that session has no current pool. */
-function currentSession() {
-  const open = openSess();
-  return open && open.pools.some(p => p.players.length) ? open : closedSess().pop() || null;
-}
+const currentSession = standSession;
 function currentPools() {
   const out = {}, s = currentSession();
   if (s) s.pools.forEach((p, k) => p.players.forEach(id => { out[id] = k; }));
@@ -377,9 +389,22 @@ function selFor(hist, starts, nows, prev) {
   const next = () => { for (let k = 1; k <= MAX_COLOURS; k++) if (!used.has(k)) { used.add(k); return k; } return 0; };
   return ids.map(id => ({ id, slot: keep[id] || 0 })).map(h => (h.slot ? h : { id: h.id, slot: next() }));
 }
-/* The players switched on. Until someone chooses, whoever is in Pool A now. */
+/* The players switched on. Until someone chooses, whoever is in Pool A now.
+   When a session is added, finished, reopened or deleted, or its pools change, the pool filters are applied again
+   so "Pool A" always means the Pool A on screen. A hand-picked set (one player from the Ratings tab, or All off) is left alone. */
 function selection(hist) {
-  if (!app.hs) { const cur = currentPools(); app.hs = { start: [], now: hist.series.some(x => cur[x.id] === 0) ? [0] : [], custom: false, on: null }; }
+  const cs = currentSession(), cur = currentPools();
+  const sig = [cs ? cs.id + cs.status : "", cs ? cs.pools.map(p => p.players.join(",")).join("|") : "", hist.labels.length, hist.series.length].join("#");
+  if (!app.hs) app.hs = { start: [], now: hist.series.some(x => cur[x.id] === 0) ? [0] : [], custom: false, on: null };
+  if (app.hs.sig !== sig) {
+    if (app.hs.sig !== undefined && !app.hs.custom) {
+      const starts = new Set(hist.series.map(x => seedLevel(x.id))), nows = new Set(hist.series.map(x => cur[x.id]));
+      app.hs.start = app.hs.start.filter(k => starts.has(k)); app.hs.now = app.hs.now.filter(k => nows.has(k));
+      if (!app.hs.start.length && !app.hs.now.length && nows.has(0)) app.hs.now = [0];      // the filter fell away with the session: back to Pool A
+      app.hs.prev = app.hs.on; app.hs.on = null;
+    }
+    app.hs.sig = sig;
+  }
   if (!app.hs.on) { app.hs.on = selFor(hist, app.hs.start, app.hs.now, app.hs.prev); app.hs.prev = null; }
   const ok = new Set(hist.series.map(x => x.id));
   return app.hs.on.filter(h => ok.has(h.id));
@@ -401,7 +426,7 @@ function historyView(hist) {
   const tile = (k, x, v, note) => (x ? `<button class="kpi" data-act="hon" data-pid="${x.id}"><span class="k">${k}</span><b class="v num">${v}</b><span class="d">${esc(nm(x.id))}</span><span class="n">${note}</span></button>` : "");
   const top = best(x => x.vals[n - 1]), climb = best(total), fall = best(x => -total(x)), week = best(lastMove), weekDown = best(x => (x.played[n - 1] ? x.vals[n - 2] - x.vals[n - 1] : -1e9));
   const cur = currentPools(), letter = k => (k == null ? "–" : String.fromCharCode(65 + k)), cs = currentSession();
-  const when = cs ? (cs.status === "closed" ? new Date(cs.date + "T00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" }) : "tonight") : "", nowLabel = cs && cs.status !== "closed" ? "Pool tonight" : `Pool on ${when}`;
+  const when = cs ? sessWhen(cs) : "", nowLabel = cs ? (when === "tonight" ? "Pool tonight" : "Pool " + when) : "Pool now";
   const starts = [...new Set(hist.series.map(x => seedLevel(x.id)))].sort(), nows = [...new Set(hist.series.map(x => cur[x.id]).filter(k => k != null))].sort();
   const seg = (kind, label, opts, vals) => `<span class="row fl"><span class="muted small">${label}</span><span class="seg slim multi" role="group" aria-label="${label}">
     <button data-act="hfilter" data-kind="${kind}" data-v="all" aria-pressed="${!app.hs.custom && !vals.length}">Any</button>${opts.map(k => `<button data-act="hfilter" data-kind="${kind}" data-v="${k}" aria-pressed="${!app.hs.custom && vals.includes(k)}">${letter(k)}</button>`).join("")}</span></span>`;
@@ -411,8 +436,7 @@ function historyView(hist) {
       ${tile("Top rating", top, fmt(top.vals[n - 1]), "now")}
       ${tile("Biggest climb", climb, sgn(total(climb)), "since seeding")}
       ${tile("Biggest fall", fall, sgn(total(fall)), "since seeding")}
-      ${tile("Best night", week, sgn(week.vals[n - 1] - week.vals[n - 2]), esc(hist.labels[n - 1]))}
-      ${tile("Toughest night", weekDown, sgn(weekDown.vals[n - 1] - weekDown.vals[n - 2]), esc(hist.labels[n - 1]))}
+      ${hist.series.some(x => x.played[n - 1]) ? tile("Best night", week, sgn(week.vals[n - 1] - week.vals[n - 2]), esc(hist.labels[n - 1])) + tile("Toughest night", weekDown, sgn(weekDown.vals[n - 1] - weekDown.vals[n - 2]), esc(hist.labels[n - 1])) : ""}
     </div>
     <div class="card chartcard"><div class="row spread"><h2>Rating after each session</h2>
         <span class="row filters">${seg("start", "Started in pool", starts, app.hs.start)}${seg("now", nowLabel, nows, app.hs.now)}</span></div>
@@ -420,7 +444,7 @@ function historyView(hist) {
       <p class="muted small">A coloured line is a session played. A grey dotted line is a week missed, where the rating carries over. Switch on any mix of pools in each filter: a player shows when they match both.${greys ? ` Only ${MAX_COLOURS} players can have a colour: the other ${greys} are plain grey.` : ""}</p>
       <div class="row spread"><h3>Players <span class="muted num">${on.length} of ${hist.series.length} shown</span></h3>
         <span class="row"><button class="btn small" data-act="hall" data-on="1">All on</button><button class="btn small" data-act="hall" data-on="">All off</button></span></div>
-      <p class="muted small">Tap a player to switch their line on or off. B › A means started in Pool B and played in Pool A ${cs && cs.status !== "closed" ? "tonight" : "on " + when}. A dash means they were not there.</p>
+      <p class="muted small">Tap a player to switch their line on or off. B › A means started in Pool B and ${cs && cs.status === "live" ? "is" : "played"} in Pool A ${when}. A dash means they were not there.</p>
       <div class="plist">${ranked.map(x => `<button class="pchip" data-act="hl" data-pid="${x.id}" aria-pressed="${!!slotOf[x.id]}">${swatch(slotOf[x.id])}<span class="pn">${esc(nm(x.id))}</span><small>${letter(seedLevel(x.id))} › ${letter(cur[x.id])}</small><b class="num">${fmt(x.vals[n - 1])}</b></button>`).join("")}</div></div>
     ${shown.length ? `<div class="card"><h2>Week by week</h2>
       <div class="scroll"><table class="wk"><thead><tr><th>Player</th><th class="r">Start</th>${closed.map((c, i) => `<th class="r">${esc(hist.labels[i + 1])}</th>`).join("")}<th class="r">Since start</th></tr></thead><tbody>
@@ -545,12 +569,14 @@ function orgSession() {
   const s = openSess();
   if (!s) {
     const last = closedSess().pop();
-    let d = new Date();
-    if (last) { d = new Date(last.date + "T00:00"); d.setDate(d.getDate() + 7); }
-    const def = app.form.newdate || `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    let def = todayIso();                         // a week after the last session, but never a day already gone
+    if (last) { const d = new Date(last.date + "T00:00"); d.setDate(d.getDate() + 7); const next = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; if (next > def) def = next; }
+    def = app.form.newdate || def;
+    const clash = closedSess().some(x => x.date === def);
     return `<form class="card" data-form="create"><h2>New session</h2>
       <p class="muted">Starts with the players who came last time. You can change who is playing next.</p>
-      <div class="row"><label class="field">Date<input id="newdate" type="date" value="${esc(def)}"></label></div>
+      <div class="row"><label class="field">Date<input id="newdate" type="date" value="${esc(def)}" ${last ? `min="${last.date}"` : ""}></label></div>
+      ${clash ? `<p class="note warn">⚠ There is already a finished session on ${dayMonth(def)}. A second one will be listed as ${dayMonth(def)} (2).</p>` : ""}
       ${errLine("session")}<button class="btn primary" type="submit">Create session</button></form>`;
   }
   return s.status === "setup" ? orgSetup(s) : orgLive(s);
@@ -632,10 +658,10 @@ function orgLive(s) {
       return `<div class="row spread"><a href="#/court/${p.id}" class="back" style="min-height:0">${esc(p.name)}</a><span class="num muted">${r.finished ? "Finished" : `Round ${r.at + 1} of ${r.total}`} · ${r.done} of ${r.playable} games</span></div><span class="bar on-surface"><i style="width:${pct(r)}%"></i></span>`; }).join("")}</div>
 
   <div class="card"><h2>Finish the session</h2>
-    <p class="muted">Finishing locks the scores and updates every rating. ${pend ? `<b>${pend} games have no score</b> and will be recorded as not played.` : "All games have a score."}</p>
+    <p class="muted">Finishing locks the scores and updates every rating. ${!done ? "<b>No scores have been entered yet</b>, so there is nothing to finish. Go back to setup or delete the session instead." : pend ? `<b>${pend} games have no score</b> and will be recorded as not played.` : "All games have a score."}</p>
     ${errLine("live")}
-    ${app.confirm === "close" ? `<div class="row"><button class="btn primary" data-act="close" data-sid="${s.id}">Yes, finish and update ratings</button><button class="btn" data-act="cancel">Not yet</button></div>` : `<button class="btn primary" data-act="ask" data-key="close">Finish session</button>`}
-    ${done ? "" : `<button class="btn" data-act="unstart" data-sid="${s.id}">Back to setup (no scores entered yet)</button>`}</div>
+    ${!done ? "" : app.confirm === "close" ? `<div class="row"><button class="btn primary" data-act="close" data-sid="${s.id}">Yes, finish and update ratings</button><button class="btn" data-act="cancel">Not yet</button></div>` : `<button class="btn primary" data-act="ask" data-key="close">Finish session</button>`}
+    ${done ? "" : `<div class="row"><button class="btn" data-act="unstart" data-sid="${s.id}">Back to setup</button>${app.confirm === "delete" ? `<button class="btn danger" data-act="delete" data-sid="${s.id}">Yes, delete it</button><button class="btn" data-act="cancel">Keep</button>` : `<button class="btn" data-act="ask" data-key="delete">Delete session</button>`}</div>`}</div>
 
   <div class="card"><h2>Reset the session</h2>
     <p class="muted">For trying the app out. Clears every score and puts each pool back to round 1. Players, pools and the draw stay as they are.</p>
@@ -670,7 +696,7 @@ function orgPlayers() {
 }
 
 function orgHistory(sid) {
-  const closed = closedSess();
+  const closed = closedSess(), names = sessLabels();
   const s = sid && sessById(sid);
   if (s && s.status === "closed") {
     const latest = closed[closed.length - 1] === s;
@@ -681,7 +707,7 @@ function orgHistory(sid) {
   }
   return `<div class="card"><h2>Finished sessions</h2>${closed.length ? `<div class="results">${closed.slice().reverse().map(x => {
     const n = Object.values(x.games).filter(g => g.status === "done").length;
-    return `<div class="res" style="grid-template-columns:1fr auto"><span class="who"><b>${shortDate(x.date)}</b> <span class="muted">${x.attending.length} players · ${n} games</span></span><a class="btn small" href="#/org/history/${x.id}">Open</a></div>`;
+    return `<div class="res" style="grid-template-columns:1fr auto"><span class="who"><b>${shortDate(x.date)}${names[x.id].endsWith(")") ? " " + names[x.id].slice(names[x.id].lastIndexOf("(")) : ""}</b> <span class="muted">${x.attending.length} players · ${n} games</span></span><a class="btn small" href="#/org/history/${x.id}">Open</a></div>`;
   }).join("")}</div>` : '<p class="muted">No finished sessions yet.</p>'}</div>`;
 }
 
@@ -933,7 +959,7 @@ document.addEventListener("submit", e => {
 document.addEventListener("input", e => {
   if (!e.target.id) return;
   app.form[e.target.id] = e.target.value;
-  if (e.target.id === "q") render();
+  if (e.target.id === "q" || e.target.id === "newdate") render();
 });
 document.addEventListener("change", async e => {
   if (e.target.id === "importfile") {

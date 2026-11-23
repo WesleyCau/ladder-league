@@ -157,4 +157,19 @@ test("reset: scores and rounds cleared, draw kept, organiser only", () => {
   assert.strictEqual(sess.status, "live");
 });
 
+test("sessions: no back-dating, no finishing an empty session", () => {
+  const st = league(8);
+  const sid = L.apply(st, "session.create", { date: "2026-11-23" }, true).id, sess = st.sessions[0];
+  L.apply(st, "session.assign", { sid }, true);
+  L.apply(st, "session.start", { sid }, true);
+  throwsCode(() => L.apply(st, "session.close", { sid }, true), "scores");
+  assert.strictEqual(sess.status, "live");
+  L.apply(st, "game.score", { sid, gid: sess.pools[0].rounds[0][0], s1: 11, s2: 3 }, false);
+  L.apply(st, "session.close", { sid }, true);
+  throwsCode(() => L.apply(st, "session.create", { date: "2026-11-16" }, true), "date");
+  assert.strictEqual(st.sessions.length, 1);
+  L.apply(st, "session.create", { date: "2026-11-23" }, true);                  // same day is allowed
+  assert.strictEqual(st.sessions.length, 2);
+});
+
 console.log(`${passed} passed`);

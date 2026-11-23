@@ -160,6 +160,23 @@ class StoreTest(unittest.TestCase):
         again = Store(self.tmp.name)
         self.assertEqual(again.state["ratings"]["current"], st.state["ratings"]["current"])
 
+    def test_session_dates_and_empty_finish(self):
+        st = self.store
+        sid = st.apply("session.create", dict(date="2026-11-23"), org=True)["id"]
+        sess = st.state["sessions"][-1]
+        st.apply("session.assign", dict(sid=sid), org=True)
+        st.apply("session.start", dict(sid=sid), org=True)
+        with self.assertRaises(ActionError) as cm:
+            st.apply("session.close", dict(sid=sid), org=True)
+        self.assertEqual(cm.exception.code, "scores")
+        self.assertEqual(sess["status"], "live")
+        st.apply("game.score", dict(sid=sid, gid=sess["pools"][0]["rounds"][0][0], s1=11, s2=3), org=False)
+        st.apply("session.close", dict(sid=sid), org=True)
+        with self.assertRaises(ActionError) as cm:
+            st.apply("session.create", dict(date="2026-11-16"), org=True)
+        self.assertEqual(cm.exception.code, "date")
+        st.apply("session.create", dict(date="2026-11-23"), org=True)
+
     def test_reset_session(self):
         st = self.store
         sid = st.apply("session.create", dict(date="2026-11-23"), org=True)["id"]

@@ -176,6 +176,8 @@ class Store:
         except ValueError:
             raise ActionError("invalid", "Pick a date for the session.")
         closed = sorted((s for s in self.state["sessions"] if s["status"] == "closed"), key=lambda s: (s["date"], s["id"]))
+        if closed and date < closed[-1]["date"]:
+            raise ActionError("date", "That date is before the last finished session (%s). Pick that day or later." % closed[-1]["date"])
         active = [pid for pid, p in self.state["players"].items() if p["active"]]
         last = set(closed[-1]["attending"]) if closed else set(active)
         sess = dict(id=self._id("s"), date=date, status="setup", attending=[p for p in active if p in last], pools=[], games={})
@@ -426,6 +428,8 @@ class Store:
 
     def do_session_close(self, a, org):
         sess = self._session(a.get("sid"), "live")
+        if not self._done(sess):
+            raise ActionError("scores", "No scores have been entered. Delete the session instead of finishing it.")
         for g in sess["games"].values():
             if g["status"] == "pending":
                 g["status"] = "skipped"

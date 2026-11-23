@@ -316,6 +316,8 @@
     const date = String(a.date || "");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || isNaN(new Date(date + "T00:00").getTime())) fail("invalid", "Pick a date for the session.");
     const closed = st.sessions.filter(s => s.status === "closed").sort((x, y) => (x.date + "|" + x.id < y.date + "|" + y.id ? -1 : 1));
+    /* a session dated before the last finished one would slot in ahead of it and re-rate every later week */
+    if (closed.length && date < closed[closed.length - 1].date) fail("date", `That date is before the last finished session (${closed[closed.length - 1].date}). Pick that day or later.`);
     const active = Object.keys(st.players).filter(pid => st.players[pid].active);
     const last = closed.length ? new Set(closed[closed.length - 1].attending) : new Set(active);
     const s = { id: nextId(st, "s"), date, status: "setup", attending: active.filter(p => last.has(p)), pools: [], games: {} };
@@ -456,6 +458,7 @@
   };
   H["session.close"] = (st, a) => {
     const s = getSession(st, a.sid, "live");
+    if (!doneGames(s).length) fail("scores", "No scores have been entered. Delete the session instead of finishing it.");
     Object.values(s.games).forEach(g => { if (g.status === "pending") g.status = "skipped"; });
     s.status = "closed";
     recompute(st);
