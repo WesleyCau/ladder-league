@@ -414,6 +414,17 @@ function ratingBoard(last, hist) {
     <p class="muted">Ratings update when the organiser finishes a session. Every game in a session counts the same, whatever order it was played in.</p>`;
 }
 
+/* A box on the player page was tapped: go to the part it is about and flash it. The scroll is immediate, and render() repeats
+   it if the page redraws in the next couple of seconds: a score arriving redraws everything, and that used to cut an animated
+   scroll short, leaving a target near the bottom of the page out of sight. */
+function jumpTo(id, again) {
+  const el = id === "p-games" ? document.querySelector('[id^="p-s-"]') : document.getElementById(id);
+  if (!el) return;
+  el.scrollIntoView({ block: el.tagName === "TR" ? "center" : "start" });
+  if (!again) { el.classList.remove("flash"); void el.offsetWidth; }
+  el.classList.add("flash");
+}
+
 /* ---------- One player ---------- */
 /* Everything the league knows about one player: where they stand, how they got there, who they play well with, every game. */
 function viewPlayer(pid) {
@@ -1071,6 +1082,7 @@ function render() {
   document.title = app.st.league.name;
   fillBoard();
   sortTables();
+  if (app.jump && Date.now() < app.jump.until && route === "player") jumpTo(app.jump.id, true); else app.jump = null;
   if (focused && !app.flow) {
     const el = document.getElementById(focused);
     if (el) { el.focus(); try { if (selStart != null) el.setSelectionRange(selStart, selStart); } catch (e) { /* not a text input */ } }
@@ -1121,13 +1133,7 @@ const A = {
   hl: d => togglePlayer(d.pid),
   hon: d => togglePlayer(d.pid, true),
   player: d => { location.hash = "#/player/" + d.pid; },
-  /* a box on the player page: scroll to the part it is about and flash it */
-  jump: d => {
-    const el = d.to === "p-games" ? document.querySelector('[id^="p-s-"]') : document.getElementById(d.to);
-    if (!el) return;
-    el.scrollIntoView({ behavior: "smooth", block: el.tagName === "TR" ? "center" : "start" });
-    el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
-  },
+  jump: d => { app.jump = { id: d.to, until: Date.now() + 2500 }; jumpTo(d.to); },
   hfilter: d => {
     const hs = app.hs; if (!hs) return;
     if (hs.custom) { hs.start = []; hs.now = []; hs.custom = false; }
@@ -1330,6 +1336,6 @@ window.addEventListener("popstate", () => {
   if (app.flow || app.dialog) { app.flow = null; app.dialog = null; render(); }      // Back pressed with a screen open: close it
   afterOverlay.splice(0).forEach(fn => fn());
 });
-window.addEventListener("hashchange", () => { app.showSkip = false; app.flow = null; app.err = {}; app.dialog = null; app.confirm = null; app.sel = null; app.edit = null; toTop(); render(); });
+window.addEventListener("hashchange", () => { app.jump = null; app.showSkip = false; app.flow = null; app.err = {}; app.dialog = null; app.confirm = null; app.sel = null; app.edit = null; toTop(); render(); });
 
 boot();
