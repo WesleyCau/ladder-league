@@ -164,72 +164,83 @@ function fillBoard() {
   }
 }
 
-/* ---------- the page behind the league name: pickleball as this club plays it ---------- */
-/* A poster: one court from above. The four players on it are the top four on the ladder right now, and the club's own story
-   (club in config.js) runs underneath. Court space: l runs 0 to 440 along the court, w runs 0 to 200 across it; the same
-   drawing is laid out lengthways for a wide screen and upright for a phone. */
-function poster(port, cast, target) {
-  const VW = port ? 264 : 592, VH = port ? 560 : 264;
-  const P = port ? (l, w) => [32 + w, 500 - l] : (l, w) => [76 + l, 32 + w];
-  const box = (cls, l0, w0, l1, w1) => { const a = P(l0, w0), b = P(l1, w1); return `<rect class="${cls}" x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(a[0] - b[0])}" height="${Math.abs(a[1] - b[1])}"/>`; };
-  const line = (cls, l0, w0, l1, w1) => { const a = P(l0, w0), b = P(l1, w1); return `<line class="${cls}" x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}"/>`; };
-  const path = pts => pts.map((p, i) => (i ? "L" : "M") + P(p[0], p[1]).join(" ")).join(" ");
-  const at = (l, w) => { const p = P(l, w); return `left:${(p[0] / VW * 100).toFixed(2)}%;top:${(p[1] / VH * 100).toFixed(2)}%`; };
-  const rally = [[-14, 150], [395, 48], [452, 46], [70, 110], [20, 118], [262, 128], [292, 146], [186, 72], [162, 62], [256, 58], [282, 52], [180, 140], [160, 150], [262, 96], [284, 90], [176, 100], [158, 104], [420, 186]];
-  const still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches, rest = P(262, 128);
-  /* serving pair behind their baseline; the receiver deep, their partner already up at the kitchen line */
-  const spots = [[-26, 150, "Server", 1], [-26, 50, "Partner", 4], [466, 48, "Receiver", 2], [300, 154, "Partner", 3]];
-  const who = (sp, i) => {
-    const id = cast && cast[i], side = i < 2 ? "us" : "them";
-    return id ? `<a class="pwho ${side}" href="#/player/${id}" style="${at(sp[0], sp[1])}"><i>${sp[3]}</i><b>${esc(sn(id))}</b></a>` : `<span class="pwho ${side}" style="${at(sp[0], sp[1])}"><b>${sp[2]}</b></span>`;
-  };
-  const note = (l, w, k, t) => `<span class="pnote" style="${at(l, w)}"><b>${k}</b>${t}</span>`;
-  const mark = (l, w, n) => `<span class="pmark" style="${at(l, w)}">${n}</span>`;
-  return `
-  <div class="poster ${port ? "port" : "land"}">
-    <svg viewBox="0 0 ${VW} ${VH}" aria-hidden="true">
-      ${box("surf", 0, 0, 440, 200)}${box("kz", 150, 0, 290, 200)}${box("edge", 0, 0, 440, 200)}
-      ${line("ln", 150, 0, 150, 200)}${line("ln", 290, 0, 290, 200)}${line("ln", 0, 100, 150, 100)}${line("ln", 290, 100, 440, 100)}
-      ${line("net", 220, -10, 220, 210)}
-      <path class="trail" d="${path(rally.slice(0, 6))}"/>
-      <circle class="ball" r="6" ${still ? `cx="${rest[0]}" cy="${rest[1]}"` : ""}>${still ? "" : `<animateMotion dur="10s" repeatCount="indefinite" path="${path(rally)}"/>`}</circle>
-    </svg>
-    ${mark(395, 48, 1)}${mark(70, 110, 2)}${mark(262, 128, 3)}
-    ${port ? note(34, 150, "Serve", "underhand and cross-court") : note(100, 174, "Serve", "underhand and cross-court")}
-    ${note(220, 24, "The kitchen", "no volleys in here")}
-    ${note(388, 152, "Two bounces", "one each side before anyone volleys")}
-    ${port ? note(122, 44, `First to ${target}`, "call it: us, them, server") : note(90, 36, `First to ${target}`, "call it: us, them, server")}
-    ${spots.map(who).join("")}
-  </div>`;
+/* ---------- a pickleball, drawn once ---------- */
+/* Holes spread evenly over a sphere, the front half drawn, each one flattened as it nears the edge. The big one is on the
+   page behind the league name; a quiet one (faint holes) sits behind every winning score, through --ball-img in the CSS. */
+function ballSvg(holes) {
+  const N = 46, out = [];
+  for (let i = 0; i < N; i++) {
+    const y = 1 - (2 * (i + 0.5)) / N, r = Math.sqrt(1 - y * y), a = i * 2.399963, x = Math.cos(a) * r, z = Math.sin(a) * r;
+    if (z < 0.2) continue;
+    const cx = (50 + 46 * x).toFixed(1), cy = (50 + 46 * y).toFixed(1);
+    out.push(`<ellipse cx="${cx}" cy="${cy}" rx="${(5 * z).toFixed(2)}" ry="5" transform="rotate(${(Math.atan2(y, x) * 180 / Math.PI).toFixed(1)} ${cx} ${cy})"/>`);
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><radialGradient id="pbg" cx="34%" cy="28%" r="80%"><stop offset="0" stop-color="#ffdc7c"/><stop offset=".5" stop-color="#ff8f1f"/><stop offset="1" stop-color="#cf4703"/></radialGradient></defs><circle cx="50" cy="50" r="49" fill="url(#pbg)"/><g fill="#4a1700" opacity="${holes}">${out.join("")}</g></svg>`;
 }
+document.documentElement.style.setProperty("--ball-img", `url("data:image/svg+xml,${encodeURIComponent(ballSvg(0.16))}")`);
+document.documentElement.style.setProperty("--ball-icon", `url("data:image/svg+xml,${encodeURIComponent(ballSvg(0.8))}")`);
+
+/* ---------- the page behind the league name: why you want to be here on a Monday ---------- */
+/* Not how to play: who is winning. The ladder leader, last week's pool winners, the season's drama, the club's story.
+   Words about the club (headline, kicker, story, an optional champion) come from club in config.js. */
 function viewPickleball() {
-  const st = app.st, club = (window.LADDER_CONFIG || {}).club || {}, target = st.league.pointsToWin, tot = st.ratings.totals || {};
+  const st = app.st, club = (window.LADDER_CONFIG || {}).club || {}, tot = st.ratings.totals || {}, out = st.ratings.games || {};
   const games = id => (tot[id] ? tot[id].w + tot[id].l : 0);
   const ranked = Object.keys(st.players).filter(id => st.players[id].active && games(id) > 0).sort((a, b) => rating(b) - rating(a) || nm(a).localeCompare(nm(b)));
-  const cast = ranked.length >= 4 ? [ranked[0], ranked[3], ranked[1], ranked[2]] : null;
-  const top = (score) => ranked.slice().sort((a, b) => score(b) - score(a) || rating(b) - rating(a))[0];
-  const climber = ranked.length ? top(id => rating(id) - st.players[id].seed) : null, winner = ranked.length ? top(id => tot[id].w) : null;
-  const lead = (k, v, id, d) => `<a class="kpi tap" href="#/player/${id}"><span class="k">${k}</span><b class="v num">${v}</b><span class="d">${esc(nm(id))}</span>${d ? `<span class="n">${d}</span>` : ""}</a>`;
-  const text = "The court seen from above, with the serve, the return, the kitchen and four players. A ball plays out a rally.";
+  const closed = closedSess(), last = closed[closed.length - 1];
+  const day = d => new Date(d + "T00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  const played = closed.flatMap(s => Object.values(s.games).filter(g => g.status === "done" && g.s1 !== g.s2).map(g => ({ s, g })));
+  const close = played.filter(x => Math.abs(x.g.s1 - x.g.s2) <= 2).length;
+  /* the least likely win of the season: the winners' chance going in */
+  const upset = played.map(x => { const o = out[x.g.id], w1 = x.g.s1 > x.g.s2; return o ? { s: x.s, g: x.g, p: w1 ? o.p1 : 1 - o.p1, win: w1 ? x.g.t1 : x.g.t2, lose: w1 ? x.g.t2 : x.g.t1 } : null; })
+    .filter(Boolean).sort((a, b) => a.p - b.p)[0];
+  const pair = ids => ids.map(id => `<a class="plink" href="#/player/${id}">${esc(sn(id))}</a>`).join(" and ");
+  const head = (club.headline || ["Fast hands.", "Long rallies.", "One more game."]).map((x, i, all) => `<span${i === all.length - 1 ? ' class="hot"' : ""}>${esc(x)}</span>`).join("");
+  const top = ranked[0], seed = id => st.players[id].seed;
+  const winners = last ? last.pools.map(p => ({ p, r: poolTable(last, p)[0] })).filter(x => x.r && x.r.w + x.r.l > 0) : [];
   return `
-  <div class="pb">
-    <div class="pbhead">
-      <span class="pbkick">${esc(club.kicker || st.league.name)}</span>
-      <h1>${esc(club.title || "This is pickleball")}</h1>
-      <p class="muted">Two a side on a court the size of a badminton court. ${cast ? "On court below: the top four on the ladder right now, first and fourth against second and third." : "Here is the whole game on one court."}</p>
-    </div>
-    <div class="pbstage" role="img" aria-label="${text}">${poster(false, cast, target)}${poster(true, cast, target)}</div>
-    <p class="muted small pbfoot">Follow the ball: a deep serve (1), a deep return (2), then a soft drop into the kitchen (3) so the serving pair can get to the net. ${cast ? "Tap a name for that player." : ""}</p>
-    ${ranked.length ? `<h2 class="sub">Leading the ladder</h2>
-    <div class="kpis">
-      ${lead("Top of the ladder", fmt(rating(ranked[0])), ranked[0], "")}
-      ${climber && rating(climber) > st.players[climber].seed ? lead("Biggest climber", sgn(rating(climber) - st.players[climber].seed), climber, "since the season started") : ""}
-      ${winner && tot[winner].w ? lead("Most wins", tot[winner].w, winner, `from ${games(winner)} games`) : ""}
-    </div>` : ""}
-    ${(club.story || []).length ? `<h2 class="sub">How we got here</h2>
-    <div class="pbstory">${club.story.map(x => `<div class="card"><b class="num">${esc(x[0])}</b><p>${esc(x[1])}</p></div>`).join("")}</div>
-    ${club.source ? `<p class="muted small">Source: <a href="${esc(club.source[1])}" target="_blank" rel="noopener">${esc(club.source[0])}</a>.</p>` : ""}` : ""}
-    <div class="row pbgo"><a class="btn primary" href="#/">Tonight's draw</a><a class="btn" href="#/standings">Standings</a></div>
+  <div class="sell">
+    <section class="s-hero">
+      <div class="s-ball" aria-hidden="true">${ballSvg(0.85)}</div>
+      <div class="s-in">
+        <span class="s-kick">${esc(club.kicker || st.league.name)}</span>
+        <h1>${head}</h1>
+        <p class="s-lede">${esc(club.pitch || "Two a side, a court you can cover in three steps, and rallies that will not end.")}${ranked.length ? ` <b>${ranked.length} players. ${played.length} games so far. One ladder.</b>` : ""}</p>
+        <div class="row s-go"><a class="btn primary" href="#/">Tonight's draw</a><a class="btn ghost" href="#/standings">The ladder</a></div>
+      </div>
+    </section>
+
+    ${club.champion ? `<a class="s-champ alt" ${club.champion.id && st.players[club.champion.id] ? `href="#/player/${club.champion.id}"` : ""}>
+      <span class="s-lab">${esc(club.champion.label || "Reigning champion")}</span><b class="s-name">${esc(club.champion.name)}</b>${club.champion.note ? `<span class="s-sub">${esc(club.champion.note)}</span>` : ""}</a>` : ""}
+    ${top ? `<a class="s-champ" href="#/player/${top}">
+      <span class="s-lab">Top of the ladder</span>
+      <b class="s-name">${esc(nm(top))}</b>
+      <span class="s-sub">${tot[top].w} wins from ${games(top)} games${rating(top) !== seed(top) ? ` · ${sgn(rating(top) - seed(top))} since the season started` : ""}</span>
+      <span class="s-num num">${fmt(rating(top))}</span>
+    </a>
+    ${ranked.length > 1 ? `<div class="s-pack"><span class="s-lab">The chasing pack</span>${ranked.slice(1, 6).map((id, i) => `<a href="#/player/${id}"><i>${i + 2}</i><b>${esc(nm(id))}</b><span class="num">${fmt(rating(id))}</span></a>`).join("")}</div>` : ""}` : ""}
+
+    ${winners.length ? `<section class="s-block">
+      <h2>Last ${esc(new Date(last.date + "T00:00").toLocaleDateString(undefined, { weekday: "long" }))}'s winners <small>${esc(day(last.date))}</small></h2>
+      <div class="s-wins">${winners.map(({ p, r }) => `<a class="s-win" href="#/player/${r.p}"><i class="s-badge">${esc(p.id)}</i><span class="s-lab">${esc(p.name)}</span><b>${esc(nm(r.p))}</b><span class="s-sub num">${r.w}-${r.l} · ${r.pf - r.pa >= 0 ? "+" : "−"}${Math.abs(r.pf - r.pa)} points</span></a>`).join("")}</div>
+    </section>` : ""}
+
+    ${played.length ? `<section class="s-block">
+      <h2>The season so far</h2>
+      <div class="s-stats">
+        <div><b class="num">${played.length}</b><span>games played over ${closed.length} night${closed.length > 1 ? "s" : ""}</span></div>
+        <div><b class="num">${close}</b><span>decided by two points or fewer</span></div>
+        ${upset ? `<div><b class="num">${Math.round(upset.p * 100)}%</b><span>the chance ${pair(upset.win)} had against ${pair(upset.lose)} on ${esc(day(upset.s.date))}. They won ${Math.max(upset.g.s1, upset.g.s2)}-${Math.min(upset.g.s1, upset.g.s2)}.</span></div>` : ""}
+      </div>
+    </section>` : ""}
+
+    ${(club.story || []).length ? `<section class="s-block">
+      <h2>${esc(club.title || "How we got here")}</h2>
+      <div class="s-story">${club.story.map(x => `<div><b class="num">${esc(x[0])}</b><p>${esc(x[1])}</p></div>`).join("")}</div>
+      ${club.source ? `<p class="s-src">From the <a href="${esc(club.source[1])}" target="_blank" rel="noopener">${esc(club.source[0])}</a>.</p>` : ""}
+    </section>` : ""}
+
+    <section class="s-end"><b>See you on court.</b><div class="row s-go"><a class="btn primary" href="#/">Tonight's draw</a><a class="btn ghost" href="#/standings">The ladder</a></div></section>
   </div>`;
 }
 
@@ -247,7 +258,7 @@ function shell(body) {
   </div></header>
   ${app.online ? "" : '<div class="offline">No connection. Scores will not save until it is back.</div>'}
   ${app.be.kind === "local" ? '<div class="demo">Single-device mode: everything is saved in this browser only.</div>' : ""}
-  <main class="${route === "board" ? "wide" : ""}">${body}</main>`;
+  <main class="${route === "board" ? "wide" : route === "pickleball" ? "bleed" : ""}">${body}</main>`;
 }
 const errLine = area => (app.err[area] ? `<p class="err" role="alert">${esc(app.err[area])}</p>` : "");
 /* One game as a scoreboard: a row per pair, names on the left, score on the right. */
@@ -482,7 +493,7 @@ function ratingBoard(last, hist) {
         const i = ids.indexOf(id), pl = P(id), r = rating(id), a = Math.min(pl.seed, r), b = Math.max(pl.seed, r), t = app.st.ratings.totals[id] || { w: 0, l: 0 }, rec = lastRec[id], ch = rec ? rec.end - rec.start : null;
         const where = !pl.active ? "dropped out" : rec ? `${esc(poolOf(id) || "played")}, ${lastDay}` : last ? (t.w + t.l ? `missed ${lastDay}` : "yet to play") : "yet to play";
         return `<li class="lrow lv${Math.min(3, seedLevel(id))}${pl.active ? "" : " off"} pickable" data-act="player" data-pid="${id}">
-          <span class="l-rk">${i + 1}</span>
+          <span class="l-rk${i === 0 ? " top" : ""}">${i + 1}</span>
           <span class="l-nm"><b><a class="rowlink" href="#/player/${id}">${esc(nm(id))}</a></b><small><i class="psw"></i>${t.w}-${t.l} · ${where}</small></span>
           <span class="trk">${grid}<i class="cn" style="left:${pos(a)};width:${((b - a) / (hi - lo) * 100).toFixed(2)}%"></i><i class="sd" style="left:${pos(pl.seed)}"></i><i class="dt" style="left:${pos(r)}"></i></span>
           <span class="l-rt">${fmt(r)}</span>
@@ -1222,7 +1233,7 @@ function render() {
   const focused = document.activeElement && document.activeElement.id, selStart = focused && document.activeElement.selectionStart;
   const html = shell(view);
   /* the pickleball page does not depend on scores: leave it alone when nothing in it changed, so its animation is not restarted */
-  if (!(route === "pickleball" && app.pbHtml === html && $("#app .pb"))) $("#app").innerHTML = html;
+  if (!(route === "pickleball" && app.pbHtml === html && $("#app .sell"))) $("#app").innerHTML = html;
   app.pbHtml = route === "pickleball" ? html : null;
   $("#overlay").innerHTML = app.flow ? viewFlow() : app.dialog ? viewDialog() : "";
   const up = !!(app.flow || app.dialog);
@@ -1231,6 +1242,7 @@ function render() {
   if (!up && overlayUp && history.state && history.state.overlay) { overlayLeaving = true; history.back(); }
   overlayUp = up;
   document.title = app.st.league.name;
+  document.body.classList.toggle("on-sell", route === "pickleball");      // that page is dark from edge to edge
   fillBoard();
   sortTables();
   fitNames();
