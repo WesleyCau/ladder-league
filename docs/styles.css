@@ -474,80 +474,38 @@ a.note { display: block; text-decoration: none; font-weight: 650; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 
-/* ---------- what is pickleball (the page behind the league name) ---------- */
-/* Its panels are black in both themes, like the top bar: white text, the brand gradient, a blue court. */
-.pb { display: flex; flex-direction: column; gap: 14px; --pk: #0b0b0d; --pk-2: #1b1b20; --pt: #ffffff; --pt-2: #cfccc6; --ball: #e6ff3a; }
-.pb section { background: var(--pk); color: var(--pt); border-radius: 22px; }
-.pbhero, .pbx, .pbshot, .pbstep { border: 1px solid rgba(255, 255, 255, .09); }      /* keeps the panels apart from a dark page */
-.pb h3 { font-size: 21px; font-weight: 800; letter-spacing: -0.01em; }
-.pb p { color: var(--pt-2); line-height: 1.5; }
-.pbhero { padding: clamp(22px, 4.5vw, 52px); background: radial-gradient(110% 150% at 100% 0%, rgba(255, 95, 13, .5), transparent 58%), radial-gradient(70% 90% at 0% 100%, rgba(255, 176, 31, .16), transparent 60%), var(--pk) !important; display: flex; flex-direction: column; gap: 12px; overflow: hidden; }
-.pbkick { font-size: 13px; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; color: var(--brand-2); }
-.pbhero h1 { font-size: clamp(44px, 12.6vw, 156px); font-weight: 900; line-height: .88; letter-spacing: -0.055em; text-transform: uppercase; background: linear-gradient(100deg, #ff5f0d, #ffb01f 70%, #ffe27a); -webkit-background-clip: text; background-clip: text; color: transparent; -webkit-text-fill-color: transparent; padding-bottom: .06em; }
-.pbtag { font-size: clamp(18px, 2.4vw, 26px); font-weight: 650; color: var(--pt) !important; max-width: 30em; line-height: 1.3 !important; }
-.pbstats { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 10px; margin-top: 8px; }
-.pbstats div { border-top: 3px solid; border-image: var(--grad) 1; padding-top: 10px; display: flex; flex-direction: column; gap: 2px; }
-.pbstats b { font-size: clamp(22px, 2.6vw, 30px); font-weight: 850; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
-.pbstats span { font-size: 14px; color: var(--pt-2); }
-.pbx { padding: clamp(12px, 2vw, 22px); display: grid; gap: 14px; align-items: center; }
-@media (min-width: 900px) { .pbx { grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 26px; } }
-.pbstage { min-width: 0; }
-.pbcourt { display: block; width: 100%; height: auto; font-family: inherit; }
-.pbcourt .surf { fill: #1a4a94; }
-.pbcourt .kz { fill: #2f73d1; }
-.pbcourt .ln * { fill: none; stroke: #fff; stroke-width: 3; }
-.pbcourt .net { stroke: #fff; stroke-width: 5; stroke-dasharray: 3 3; }
-.pbcourt .post { fill: #fff; }
-.pbcourt text { fill: #fff; font-weight: 850; font-size: 17px; letter-spacing: .12em; text-anchor: middle; }
-.pbcourt .kt { font-size: 18px; opacity: .85; dominant-baseline: middle; }
-.pbcourt .lab.dim { fill: #b9b6b0; font-weight: 700; letter-spacing: .04em; }
-.pbcourt .lab.big { font-size: 27px; dominant-baseline: middle; }
-.pbcourt .lab.bad { fill: #ffd0d0; }
-.pbcourt .lab.dark { fill: #160a00; letter-spacing: .1em; font-size: 22px; }
-.pbcourt .us { fill: #ffb01f; stroke: #160a00; stroke-width: 2; }
-.pbcourt .them { fill: #fff; stroke: #160a00; stroke-width: 2; }
-.pbcourt .trail { fill: none; stroke: var(--ball); stroke-width: 2; stroke-dasharray: 2 7; stroke-linecap: round; opacity: .55; }
-.pbcourt .ball { fill: var(--ball); stroke: #160a00; stroke-width: 1.5; filter: drop-shadow(0 0 6px rgba(230, 255, 58, .9)); }
-.pbcourt .bn circle { fill: #0b0b0d; stroke: var(--ball); stroke-width: 2.5; }
-.pbcourt .bn text { fill: var(--ball); font-size: 16px; letter-spacing: 0; }
-.pbcourt .arrow { fill: none; stroke: var(--ball); stroke-width: 4; stroke-linecap: round; }
-.pbcourt .hit { fill: #ff7a1a; opacity: .9; }
-.pbcourt .miss { fill: #c63b3b; opacity: .55; }
-.pbcourt .shade { fill: #0b0b0d; opacity: .78; }
-.pbcourt .sc { font-size: 84px; letter-spacing: -0.02em; font-weight: 900; fill: #ffb01f; }
-.pbcourt .sc.sep { fill: #fff; opacity: .45; font-size: 60px; }
-.pbcourt .ov { display: none; }
-.pb[data-show="rally"] .ov-rally, .pb[data-show="serve"] .ov-serve, .pb[data-show="bounce"] .ov-bounce, .pb[data-show="kitchen"] .ov-kitchen, .pb[data-show="score"] .ov-score { display: inline; }
-.pb[data-show="kitchen"] .pbcourt .kz { fill: #ff7a1a; }
-.pb[data-show="kitchen"] .pbcourt .kt, .pb[data-show="serve"] .pbcourt .kt2 { display: none; }
-.pbside { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-.pbtabs { display: flex; flex-wrap: wrap; gap: 8px; }
-.pbtab { border: 0; border-radius: 99px; background: var(--pk-2); color: var(--pt); font: inherit; font-weight: 750; font-size: 15px; padding: 0 16px; min-height: 44px; cursor: pointer; }
-.pbtab[aria-pressed="true"] { background: var(--grad); color: var(--on-brand); }
-.pbtab:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
-.pbcap { display: flex; flex-direction: column; gap: 8px; min-height: 11.5em; }
-.pbcap h3 { font-size: clamp(24px, 2.6vw, 32px); }
-.pbcap p { font-size: 17px; }
-.pbcap .pbnote { color: var(--brand-2); font-weight: 750; }
-.pbkey { font-size: 13px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.pbkey i { width: 12px; height: 12px; border-radius: 50%; display: inline-block; margin-left: 10px; }
-.pbkey i:first-child { margin-left: 0; }
-.pbkey .us { background: #ffb01f; } .pbkey .them { background: #fff; } .pbkey .bl { background: var(--ball); }
-.pbshots, .pbsteps { background: transparent !important; display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
-.pbshots { grid-template-columns: 1fr; }
-@media (min-width: 620px) { .pbshots { grid-template-columns: repeat(2, 1fr); } }
-@media (min-width: 1000px) { .pbshots { grid-template-columns: repeat(3, 1fr); } }
-@media (max-width: 619px) { .pbshot { display: grid !important; grid-template-columns: 112px minmax(0, 1fr); column-gap: 14px; align-items: start; } .pbshot svg { grid-row: 1 / span 2; } }
-.pbshot, .pbstep { background: var(--pk); color: var(--pt); border-radius: 18px; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
-.pbshot p, .pbstep p { font-size: 15.5px; }
-.pbshot svg { width: 100%; max-width: 230px; height: auto; background: var(--pk-2); border-radius: 12px; }
-.pbshot svg .g { stroke: #5a5a63; stroke-width: 2; }
-.pbshot svg .n { stroke: #fff; stroke-width: 3; }
-.pbshot svg .k { fill: #1f4f9e; }
-.pbshot svg .post { fill: #fff; }
-.pbshot svg .t { fill: none; stroke: #ffb01f; stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: 1 5; }
-.pbshot svg .p { fill: none; stroke: #fff; stroke-width: 2; stroke-dasharray: 3 4; opacity: .7; }
-.pbshot svg .pl { fill: #fff; }
-.pbshot svg .b { fill: var(--ball); }
-.pbstep .num { font-size: 54px; font-weight: 900; line-height: .9; letter-spacing: -0.04em; background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; -webkit-text-fill-color: transparent; align-self: flex-start; }
+/* ---------- the page behind the league name: a poster of the court ---------- */
+.pb { display: flex; flex-direction: column; gap: 14px; }
+.pbhead { display: flex; flex-direction: column; gap: 4px; }
+.pbkick { font-size: 13px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--brand-text); }
+.pbhead p { max-width: 46em; }
+.pbstage { display: flex; justify-content: center; }
+.poster { position: relative; background: #24694f; border-radius: 22px; overflow: hidden; flex: none; box-shadow: 0 10px 30px rgba(0, 0, 0, .18); }
+.poster.land { aspect-ratio: 592 / 264; width: min(100%, calc((100vh - 240px) * 592 / 264)); min-width: min(100%, 640px); }
+.poster.port { aspect-ratio: 264 / 560; width: min(100%, calc((100vh - 150px) * 264 / 560)); min-width: min(100%, 300px); display: none; }
+@media (max-width: 699px) { .poster.land { display: none; } .poster.port { display: block; } }
+.poster svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.poster .surf { fill: #2a6fc4; }
+.poster .kz { fill: #1c4d93; }
+.poster .edge { fill: none; stroke: #fff; stroke-width: 3; }
+.poster .ln { stroke: #fff; stroke-width: 3; }
+.poster .net { stroke: #fff; stroke-width: 5; stroke-dasharray: 2 3; }
+.poster .trail { fill: none; stroke: #e6ff3a; stroke-width: 2; stroke-dasharray: 1.5 6; stroke-linecap: round; opacity: .8; }
+.poster .ball { fill: #e6ff3a; stroke: #1a1a00; stroke-width: 1.2; filter: drop-shadow(0 0 5px rgba(230, 255, 58, .9)); }
+.pnote, .pmark, .pwho { position: absolute; transform: translate(-50%, -50%); }
+.pnote { background: rgba(255, 255, 255, .96); color: #111113; border-radius: 12px; padding: 6px 10px 7px; font-size: clamp(12.5px, 1.25vw, 16px); line-height: 1.2; font-weight: 600; text-align: center; width: max-content; max-width: 10.5em; box-shadow: 0 2px 10px rgba(0, 0, 0, .28); }
+.pnote b { display: block; font-size: .8em; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; color: #b84e00; }
+.pmark { width: 24px; height: 24px; border-radius: 50%; background: #111113; color: #e6ff3a; border: 2px solid #e6ff3a; font-size: 12.5px; font-weight: 850; display: flex; align-items: center; justify-content: center; }
+.pwho { display: flex; align-items: center; gap: 6px; background: #111113; color: #fff; border-radius: 99px; padding: 4px 11px 4px 4px; font-size: clamp(12.5px, 1.3vw, 16px); font-weight: 750; white-space: nowrap; text-decoration: none; box-shadow: 0 2px 10px rgba(0, 0, 0, .3); }
+.pwho i { font-style: normal; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12.5px; font-weight: 850; color: #160a00; background: #fff; }
+.pwho.us i { background: #ffb01f; }
+span.pwho { padding: 5px 12px; }
+a.pwho:hover, a.pwho:active { background: #2a2a30; }
+a.pwho:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+.pbfoot { text-align: center; }
+.pbstory { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.pbstory .card { gap: 4px; }
+.pbstory .num { font-size: 30px; font-weight: 850; letter-spacing: -0.02em; color: var(--brand-text); }
+.pbstory p { color: var(--ink-2); line-height: 1.45; }
+a.kpi { text-decoration: none; color: inherit; }
 .pbgo { gap: 10px; flex-wrap: wrap; }

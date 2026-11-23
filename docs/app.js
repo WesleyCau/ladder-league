@@ -164,91 +164,71 @@ function fillBoard() {
   }
 }
 
-/* ---------- what is pickleball: the page behind the league name ---------- */
-/* One court seen from above, five things to show on it. Court units are feet x 10: 440 long, 200 wide, net at 220, kitchen lines at 150 and 290. */
-const PB = [
-  ["rally", "The rally", "A rally in ten seconds", "Serve deep (1). Return deep (2). Then the shot the whole game hinges on: a soft drop into the kitchen (3), so the serving pair can walk up to the net. After that it is fast hands at close range until somebody blinks."],
-  ["serve", "Serve", "The serve", "Underhand, struck below the waist, from behind the baseline. It goes diagonally and has to land past the kitchen, line included. You get one go."],
-  ["bounce", "Two bounces", "The two-bounce rule", "The serve has to bounce before it is returned (1). The return has to bounce too (2). Only then can anyone hit the ball out of the air. No serve and volley: that is why rallies last."],
-  ["kitchen", "The kitchen", "The kitchen", "The 2.13 m strip either side of the net. You cannot volley while standing in it or touching its line, and your momentum cannot carry you in afterwards. Once the ball has bounced, step in and play it. This one rule is why the game is about touch, not just power."],
-  ["score", "Scoring", "Scoring", "Classic rules: you only score when your side is serving. Games go to 11, win by two. In doubles the score is called as three numbers: your score, their score, then whether you are the first or second server. So 4-2-1 means we lead 4-2 and I am server one."]
-];
-const PB_SHOTS = [
-  ["Dink", "A soft shot that drops into the other kitchen. Unattackable when it is good. Twenty in a row is normal.", "side", "M44 46 Q60 22 78 50"],
-  ["Third shot drop", "From the back of the court, a high soft arc that dies in the kitchen. It buys the time to reach the net.", "side", "M8 44 Q50 0 76 50"],
-  ["Drive", "Flat and hard, aimed at a hip or at the gap between two players.", "side", "M8 42 Q60 29 114 41"],
-  ["Lob", "Over their heads when they crowd the net. Glorious when it works. A free smash for them when it does not.", "side", "M42 46 Q72 -34 114 50"],
-  ["Erne", "Leap around the corner of the kitchen and volley from outside the sideline, right at the net. Legal, cheeky, and named after Erne Perry.", "erne", ""],
-  ["ATP", "Around the post. Dragged wide enough, you can hit the ball around the net post instead of over the net, even below net height.", "atp", ""]
-];
-function pbShot(kind, path) {
-  const ball = (x, y) => `<circle class="b" cx="${x}" cy="${y}" r="3.6"/>`;
-  if (kind === "side") {
-    const end = path.split(" ").slice(-2).map(Number);
-    return `<svg viewBox="0 0 120 60" aria-hidden="true"><line class="g" x1="2" y1="52" x2="118" y2="52"/><line class="n" x1="60" y1="38" x2="60" y2="52"/><path class="t" d="${path}"/>${ball(end[0], end[1])}</svg>`;
-  }
-  if (kind === "erne") return `<svg viewBox="0 0 120 60" aria-hidden="true"><rect class="k" x="26" y="6" width="34" height="38"/><rect class="k" x="60" y="6" width="34" height="38"/><line class="g" x1="2" y1="44" x2="118" y2="44"/><line class="n" x1="60" y1="2" x2="60" y2="48"/><path class="p" d="M16 36 Q30 58 55 51"/><circle class="pl" cx="55" cy="51" r="5"/><path class="t" d="M57 49 L96 30"/>${ball(96, 30)}</svg>`;
-  return `<svg viewBox="0 0 120 60" aria-hidden="true"><line class="g" x1="2" y1="40" x2="118" y2="40"/><line class="n" x1="60" y1="2" x2="60" y2="40"/><circle class="post" cx="60" cy="40" r="3"/><circle class="pl" cx="20" cy="54" r="5"/><path class="t" d="M24 53 Q62 58 100 26"/>${ball(100, 26)}</svg>`;
+/* ---------- the page behind the league name: pickleball as this club plays it ---------- */
+/* A poster: one court from above. The four players on it are the top four on the ladder right now, and the club's own story
+   (club in config.js) runs underneath. Court space: l runs 0 to 440 along the court, w runs 0 to 200 across it; the same
+   drawing is laid out lengthways for a wide screen and upright for a phone. */
+function poster(port, cast, target) {
+  const VW = port ? 264 : 592, VH = port ? 560 : 264;
+  const P = port ? (l, w) => [32 + w, 500 - l] : (l, w) => [76 + l, 32 + w];
+  const box = (cls, l0, w0, l1, w1) => { const a = P(l0, w0), b = P(l1, w1); return `<rect class="${cls}" x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(a[0] - b[0])}" height="${Math.abs(a[1] - b[1])}"/>`; };
+  const line = (cls, l0, w0, l1, w1) => { const a = P(l0, w0), b = P(l1, w1); return `<line class="${cls}" x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}"/>`; };
+  const path = pts => pts.map((p, i) => (i ? "L" : "M") + P(p[0], p[1]).join(" ")).join(" ");
+  const at = (l, w) => { const p = P(l, w); return `left:${(p[0] / VW * 100).toFixed(2)}%;top:${(p[1] / VH * 100).toFixed(2)}%`; };
+  const rally = [[-14, 150], [395, 48], [452, 46], [70, 110], [20, 118], [262, 128], [292, 146], [186, 72], [162, 62], [256, 58], [282, 52], [180, 140], [160, 150], [262, 96], [284, 90], [176, 100], [158, 104], [420, 186]];
+  const still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches, rest = P(262, 128);
+  /* serving pair behind their baseline; the receiver deep, their partner already up at the kitchen line */
+  const spots = [[-26, 150, "Server", 1], [-26, 50, "Partner", 4], [466, 48, "Receiver", 2], [300, 154, "Partner", 3]];
+  const who = (sp, i) => {
+    const id = cast && cast[i], side = i < 2 ? "us" : "them";
+    return id ? `<a class="pwho ${side}" href="#/player/${id}" style="${at(sp[0], sp[1])}"><i>${sp[3]}</i><b>${esc(sn(id))}</b></a>` : `<span class="pwho ${side}" style="${at(sp[0], sp[1])}"><b>${sp[2]}</b></span>`;
+  };
+  const note = (l, w, k, t) => `<span class="pnote" style="${at(l, w)}"><b>${k}</b>${t}</span>`;
+  const mark = (l, w, n) => `<span class="pmark" style="${at(l, w)}">${n}</span>`;
+  return `
+  <div class="poster ${port ? "port" : "land"}">
+    <svg viewBox="0 0 ${VW} ${VH}" aria-hidden="true">
+      ${box("surf", 0, 0, 440, 200)}${box("kz", 150, 0, 290, 200)}${box("edge", 0, 0, 440, 200)}
+      ${line("ln", 150, 0, 150, 200)}${line("ln", 290, 0, 290, 200)}${line("ln", 0, 100, 150, 100)}${line("ln", 290, 100, 440, 100)}
+      ${line("net", 220, -10, 220, 210)}
+      <path class="trail" d="${path(rally.slice(0, 6))}"/>
+      <circle class="ball" r="6" ${still ? `cx="${rest[0]}" cy="${rest[1]}"` : ""}>${still ? "" : `<animateMotion dur="10s" repeatCount="indefinite" path="${path(rally)}"/>`}</circle>
+    </svg>
+    ${mark(395, 48, 1)}${mark(70, 110, 2)}${mark(262, 128, 3)}
+    ${port ? note(34, 150, "Serve", "underhand and cross-court") : note(100, 174, "Serve", "underhand and cross-court")}
+    ${note(220, 24, "The kitchen", "no volleys in here")}
+    ${note(388, 152, "Two bounces", "one each side before anyone volleys")}
+    ${port ? note(122, 44, `First to ${target}`, "call it: us, them, server") : note(90, 36, `First to ${target}`, "call it: us, them, server")}
+    ${spots.map(who).join("")}
+  </div>`;
 }
 function viewPickleball() {
-  const show = PB.some(x => x[0] === app.pb) ? app.pb : "rally", target = app.st.league.pointsToWin, size = app.st.league.poolSize;
-  const still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const dot = (x, y, n) => `<g class="bn"><circle cx="${x}" cy="${y}" r="13"/><text x="${x}" y="${y + 6}">${n}</text></g>`;
-  const rally = "M-6 150 L395 48 L446 42 L70 110 L20 118 L262 128 L286 136 L186 72 L162 62 L256 58 L282 52 L180 140 L160 150 L262 96 L284 90 L176 100 L158 104 L420 186";
-  const court = `
-  <svg class="pbcourt" viewBox="-40 -46 520 304" role="img" aria-label="A pickleball court seen from above: a net across the middle, a kitchen zone either side of it, and two service courts behind each kitchen.">
-    <defs><marker id="pbarr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#e6ff3a"/></marker></defs>
-    <rect class="surf" x="0" y="0" width="440" height="200"/>
-    <rect class="kz" x="150" y="0" width="140" height="200"/>
-    <g class="ov ov-serve"><rect class="hit" x="290" y="0" width="150" height="100"/><rect class="miss" x="220" y="0" width="70" height="100"/></g>
-    <g class="ln"><rect x="0" y="0" width="440" height="200"/><line x1="150" y1="0" x2="150" y2="200"/><line x1="290" y1="0" x2="290" y2="200"/><line x1="0" y1="100" x2="150" y2="100"/><line x1="290" y1="100" x2="440" y2="100"/></g>
-    <text class="kt" transform="translate(191 100) rotate(-90)">KITCHEN</text><text class="kt kt2" transform="translate(261 100) rotate(90)">KITCHEN</text>
-    <line class="net" x1="220" y1="-12" x2="220" y2="212"/><circle class="post" cx="220" cy="-12" r="5"/><circle class="post" cx="220" cy="212" r="5"/>
-    <text class="lab" x="220" y="-24">NET</text><text class="lab dim" x="220" y="244">13.4 m long, 6.1 m wide</text>
-    <circle class="us" cx="-8" cy="150" r="10"/><circle class="us" cx="-8" cy="50" r="10"/><circle class="them" cx="448" cy="46" r="10"/><circle class="them" cx="298" cy="152" r="10"/>
-    <g class="ov ov-rally"><path class="trail" d="M-6 150 L395 48 L446 42 L70 110 L20 118 L262 128"/>${dot(395, 48, 1)}${dot(70, 110, 2)}${dot(262, 128, 3)}
-      <circle class="ball" r="8" ${still ? 'cx="262" cy="128"' : ""}>${still ? "" : `<animateMotion dur="10s" repeatCount="indefinite" path="${rally}"/>`}</circle></g>
-    <g class="ov ov-serve"><path class="arrow" d="M4 147 L378 53" marker-end="url(#pbarr)"/><text class="lab big" x="365" y="84">IN</text><text class="lab big bad" x="255" y="28">✕</text></g>
-    <g class="ov ov-bounce"><path class="arrow" d="M4 147 L380 52" marker-end="url(#pbarr)"/><path class="arrow" d="M436 48 L86 108" marker-end="url(#pbarr)"/>${dot(395, 48, 1)}${dot(70, 110, 2)}</g>
-    <g class="ov ov-kitchen"><text class="lab big dark" transform="translate(191 100) rotate(-90)">NO VOLLEYS</text><text class="lab big dark" transform="translate(261 100) rotate(90)">NO VOLLEYS</text></g>
-    <g class="ov ov-score"><rect class="shade" x="-40" y="-46" width="520" height="304"/><text class="sc" x="118" y="118">4</text><text class="sc" x="220" y="118">2</text><text class="sc" x="322" y="118">1</text><text class="sc sep" x="169" y="112">-</text><text class="sc sep" x="271" y="112">-</text>
-      <text class="lab" x="118" y="160">US</text><text class="lab" x="220" y="160">THEM</text><text class="lab" x="322" y="160">SERVER</text></g>
-  </svg>`;
-  const steps = [
-    ["Pools by rating", `Each week, whoever turns up is ranked by rating and split into pools of about ${size === 8 ? "eight" : size}.`],
-    ["Everyone partners everyone", "In a pool of eight you play seven games, each with a different partner. No carrying, no hiding."],
-    ["Every game moves your rating", "Beat a stronger pair and you gain more. The score counts a little too."],
-    ["Next week reshuffles", "New ratings, new pools. Climb, and the company gets tougher."]
-  ];
+  const st = app.st, club = (window.LADDER_CONFIG || {}).club || {}, target = st.league.pointsToWin, tot = st.ratings.totals || {};
+  const games = id => (tot[id] ? tot[id].w + tot[id].l : 0);
+  const ranked = Object.keys(st.players).filter(id => st.players[id].active && games(id) > 0).sort((a, b) => rating(b) - rating(a) || nm(a).localeCompare(nm(b)));
+  const cast = ranked.length >= 4 ? [ranked[0], ranked[3], ranked[1], ranked[2]] : null;
+  const top = (score) => ranked.slice().sort((a, b) => score(b) - score(a) || rating(b) - rating(a))[0];
+  const climber = ranked.length ? top(id => rating(id) - st.players[id].seed) : null, winner = ranked.length ? top(id => tot[id].w) : null;
+  const lead = (k, v, id, d) => `<a class="kpi tap" href="#/player/${id}"><span class="k">${k}</span><b class="v num">${v}</b><span class="d">${esc(nm(id))}</span>${d ? `<span class="n">${d}</span>` : ""}</a>`;
+  const text = "The court seen from above, with the serve, the return, the kitchen and four players. A ball plays out a rally.";
   return `
-  <div class="pb" data-show="${show}">
-    <section class="pbhero">
-      <span class="pbkick">The game we are all here for</span>
-      <h1>Pickleball</h1>
-      <p class="pbtag">Tennis angles, table tennis hands, a badminton-sized court. Easy to start, very hard to stop.</p>
-      <div class="pbstats">
-        <div><b>6.1 × 13.4 m</b><span>the court: a badminton doubles court</span></div>
-        <div><b>86 cm</b><span>net height in the middle</span></div>
-        <div><b>26 to 40</b><span>holes in the ball</span></div>
-        <div><b>1965</b><span>invented near Seattle as a backyard game</span></div>
-      </div>
-    </section>
-
-    <h2 class="sub">The court, and the rules that make it pickleball</h2>
-    <section class="pbx">
-      <div class="pbstage">${court}</div>
-      <div class="pbside">
-        <div class="pbtabs" role="group" aria-label="What to show on the court">${PB.map(x => `<button class="pbtab" data-act="pbshow" data-k="${x[0]}" aria-pressed="${x[0] === show}">${x[1]}</button>`).join("")}</div>
-        ${PB.filter(x => x[0] === show).map(x => `<div class="pbcap" aria-live="polite"><h3>${x[2]}</h3><p>${x[3]}</p>${x[0] === "score" ? `<p class="pbnote">This league plays first to ${target}.</p>` : ""}</div>`).join("")}
-        <p class="pbkey"><i class="us"></i>serving pair<i class="them"></i>receiving pair<i class="bl"></i>ball</p>
-      </div>
-    </section>
-
-    <h2 class="sub">Shots worth stealing</h2>
-    <section class="pbshots">${PB_SHOTS.map(x => `<div class="pbshot">${pbShot(x[2], x[3])}<h3>${x[0]}</h3><p>${x[1]}</p></div>`).join("")}</section>
-
-    <h2 class="sub">How this ladder works</h2>
-    <section class="pbsteps">${steps.map((x, i) => `<div class="pbstep"><b class="num">${i + 1}</b><h3>${x[0]}</h3><p>${x[1]}</p></div>`).join("")}</section>
+  <div class="pb">
+    <div class="pbhead">
+      <span class="pbkick">${esc(club.kicker || st.league.name)}</span>
+      <h1>${esc(club.title || "This is pickleball")}</h1>
+      <p class="muted">Two a side on a court the size of a badminton court. ${cast ? "On court below: the top four on the ladder right now, first and fourth against second and third." : "Here is the whole game on one court."}</p>
+    </div>
+    <div class="pbstage" role="img" aria-label="${text}">${poster(false, cast, target)}${poster(true, cast, target)}</div>
+    <p class="muted small pbfoot">Follow the ball: a deep serve (1), a deep return (2), then a soft drop into the kitchen (3) so the serving pair can get to the net. ${cast ? "Tap a name for that player." : ""}</p>
+    ${ranked.length ? `<h2 class="sub">Leading the ladder</h2>
+    <div class="kpis">
+      ${lead("Top of the ladder", fmt(rating(ranked[0])), ranked[0], "")}
+      ${climber && rating(climber) > st.players[climber].seed ? lead("Biggest climber", sgn(rating(climber) - st.players[climber].seed), climber, "since the season started") : ""}
+      ${winner && tot[winner].w ? lead("Most wins", tot[winner].w, winner, `from ${games(winner)} games`) : ""}
+    </div>` : ""}
+    ${(club.story || []).length ? `<h2 class="sub">How we got here</h2>
+    <div class="pbstory">${club.story.map(x => `<div class="card"><b class="num">${esc(x[0])}</b><p>${esc(x[1])}</p></div>`).join("")}</div>
+    ${club.source ? `<p class="muted small">Source: <a href="${esc(club.source[1])}" target="_blank" rel="noopener">${esc(club.source[0])}</a>.</p>` : ""}` : ""}
     <div class="row pbgo"><a class="btn primary" href="#/">Tonight's draw</a><a class="btn" href="#/standings">Standings</a></div>
   </div>`;
 }
@@ -1277,7 +1257,6 @@ const A = {
   fullscreen: () => fsToggle(),
   toggleSkip: () => { app.showSkip = !app.showSkip; render(); },
   tab: d => { app.tab = d.tab; render(); },
-  pbshow: d => { app.pb = d.k; render(); },
   hl: d => togglePlayer(d.pid),
   hon: d => { location.hash = "#/player/" + d.pid; },
   player: d => { location.hash = "#/player/" + d.pid; },
