@@ -353,7 +353,7 @@ table.wk td { white-space: nowrap; }
 .bs-3 .editbtn { border: 2px solid var(--brand); background: transparent; color: var(--brand-text); border-radius: 8px; padding: 1px 9px; font-size: clamp(12px, 1.25vw, 15px); font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 
 .bsw { justify-content: center; margin-top: 4px; }
-.bh-centre .bhead { justify-content: center; gap: 10px; flex-wrap: nowrap; }
+.board .bhead { justify-content: center; gap: 10px; flex-wrap: nowrap; }      /* pool name and round together, centred over the column */
 .bopts { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px 28px; align-items: start; }
 .bopt { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .bopt .board { margin: 0; grid-template-columns: minmax(0, 1fr); }
