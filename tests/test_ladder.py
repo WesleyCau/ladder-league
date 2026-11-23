@@ -232,6 +232,18 @@ class StoreTest(unittest.TestCase):
         self.assertEqual(cm.exception.code, "scores")
         st.apply("session.delete", dict(sid=sid, force=True), org=True)
 
+    def test_same_as_last_week(self):
+        st = self.store
+        last = max((s for s in st.state["sessions"] if s["status"] == "closed"), key=lambda s: (s["date"], s["id"]))
+        want = sorted(pid for pid in last["attending"] if st.state["players"][pid]["active"])
+        sid = st.apply("session.create", dict(date=last["date"]), org=True)["id"]
+        sess = st.state["sessions"][-1]
+        st.apply("session.attendAll", dict(sid=sid, on=True), org=True)
+        st.apply("session.assign", dict(sid=sid), org=True)
+        st.apply("session.attendAll", dict(sid=sid, last=True), org=True)
+        self.assertEqual(sorted(sess["attending"]), want)
+        self.assertTrue(all(pid in sess["attending"] for pool in sess["pools"] for pid in pool["players"]))
+
     def test_reset_session(self):
         st = self.store
         sid = st.apply("session.create", dict(date="2026-11-23"), org=True)["id"]

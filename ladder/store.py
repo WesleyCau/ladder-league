@@ -228,6 +228,18 @@ class Store:
 
     def do_session_attendAll(self, a, org):
         sess = self._session(a.get("sid"), "setup")
+        if a.get("last"):
+            closed = sorted((s for s in self.state["sessions"] if s["status"] == "closed"), key=lambda s: (s["date"], s["id"]))
+            if not closed:
+                raise ActionError("none", "There is no finished session to copy from yet.")
+            players = self.state["players"]
+            want = [pid for pid in closed[-1]["attending"] if pid in players and players[pid]["active"]]
+            for pid in [p for p in sess["attending"] if p not in want]:
+                self._remove_from_session(sess, pid)
+            for pid in want:
+                if pid not in sess["attending"]:
+                    sess["attending"].append(pid)
+            return dict(players=len(sess["attending"]))
         if a.get("on"):
             for pid, p in self.state["players"].items():
                 if p["active"] and pid not in sess["attending"]:

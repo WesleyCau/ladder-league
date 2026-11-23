@@ -748,7 +748,7 @@ function orgSetup(s) {
     ${app.confirm === "delete" ? `<span class="row"><button class="btn small danger" data-act="delete" data-sid="${s.id}">Yes, delete it</button><button class="btn small" data-act="cancel">Keep</button></span>` : `<button class="btn small" data-act="ask" data-key="delete">Delete session</button>`}</div>
 
   <div class="card"><div class="row spread"><h2>1. Who is playing <span class="muted num">(${s.attending.length})</span></h2>
-      <span class="row"><button class="btn small" data-act="attendAll" data-sid="${s.id}" data-on="1">Everyone</button><button class="btn small" data-act="attendAll" data-sid="${s.id}" data-on="">No one</button></span></div>
+      <span class="row">${closedSess().length ? `<button class="btn small" data-act="attendAll" data-sid="${s.id}" data-last="1">Same as last week</button>` : ""}<button class="btn small" data-act="attendAll" data-sid="${s.id}" data-on="1">Everyone</button><button class="btn small" data-act="attendAll" data-sid="${s.id}" data-on="">No one</button></span></div>
     <input id="q" type="search" placeholder="Find a player" value="${esc(app.form.q || "")}" aria-label="Find a player">
     <div class="chips">${active.filter(p => !q || p.name.toLowerCase().includes(q)).map(p => `<button class="chip" data-act="attend" data-sid="${s.id}" data-pid="${p.id}" aria-pressed="${inSet.has(p.id)}"><i>✓</i><span>${esc(p.name)}</span></button>`).join("") || '<p class="muted">No player matches.</p>'}</div>
     <form class="row" data-form="addplayer" data-sid="${s.id}" style="align-items:flex-end">
@@ -1095,7 +1095,7 @@ const A = {
   ask: d => { app.confirm = d.key; render(); },
   cancel: () => { app.confirm = null; app.sel = null; app.edit = null; app.importDoc = null; app.dialog = null; render(); },
   attend: d => { if (d.off) app.sel = null; const s = sessById(d.sid); return act("attend", "session.attend", { sid: d.sid, pid: d.pid, on: d.off ? false : !(s && s.attending.includes(d.pid)) }); },
-  attendAll: d => act("attend", "session.attendAll", { sid: d.sid, on: !!d.on }),
+  attendAll: d => { app.sel = null; return act("attend", "session.attendAll", d.last ? { sid: d.sid, last: true } : { sid: d.sid, on: !!d.on }, d.last ? "Same players as last week" : ""); },
   assign: d => { app.sel = null; app.confirm = null; return act("pools", "session.assign", d.pools ? { sid: d.sid, pools: +d.pools } : { sid: d.sid }); },
   pick: d => { app.sel = app.sel === d.pid ? null : d.pid; render(); },
   move: d => { app.sel = null; return act("pools", "session.move", { sid: d.sid, pid: d.pid, to: d.to }); },

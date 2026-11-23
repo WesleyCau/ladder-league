@@ -228,4 +228,24 @@ test("the sampled order average is the published one (same numbers as the Python
   assert.deepStrictEqual(got, JSON.parse(fs.readFileSync(file, "utf8")).ends);
 });
 
+test("same as last week: attendance copied from the last finished session", () => {
+  const st = league(12);
+  throwsCode(() => { const sid0 = L.apply(st, "session.create", { date: "2026-11-16" }, true).id; L.apply(st, "session.attendAll", { sid: sid0, last: true }, true); }, "none");
+  const sid = st.sessions[0].id, first = st.sessions[0];
+  ["p9", "p10", "p11", "p12"].forEach(pid => L.apply(st, "session.attend", { sid, pid, on: false }, true));
+  L.apply(st, "session.assign", { sid }, true);
+  L.apply(st, "session.start", { sid }, true);
+  L.apply(st, "game.score", { sid, gid: first.pools[0].rounds[0][0], s1: 11, s2: 3 }, false);
+  L.apply(st, "session.close", { sid }, true);
+  L.apply(st, "player.update", { id: "p8", active: false }, true);              // dropped out since
+  const sid2 = L.apply(st, "session.create", { date: "2026-11-23" }, true).id, next = st.sessions[1];
+  L.apply(st, "session.attendAll", { sid: sid2, on: true }, true);
+  assert.strictEqual(next.attending.length, 11);
+  L.apply(st, "session.assign", { sid: sid2 }, true);
+  assert.strictEqual(L.apply(st, "session.attendAll", { sid: sid2, last: true }, true).players, 7);
+  assert.deepStrictEqual(next.attending.slice().sort(), ["p1", "p2", "p3", "p4", "p5", "p6", "p7"]);
+  assert.ok(next.pools.every(p => p.players.every(pid => next.attending.includes(pid))));       // nobody left in a pool who is not playing
+  throwsCode(() => L.apply(st, "session.attendAll", { sid: sid2, last: true }, false), "pin");
+});
+
 console.log(`${passed} passed`);

@@ -337,6 +337,15 @@
   };
   H["session.attendAll"] = (st, a) => {
     const s = getSession(st, a.sid, "setup");
+    if (a.last) {
+      /* exactly the players who were at the last finished session (and are still in the league); pools keep whoever stays */
+      const closed = st.sessions.filter(x => x.status === "closed").sort((x, y) => (x.date + "|" + x.id < y.date + "|" + y.id ? -1 : 1));
+      if (!closed.length) fail("none", "There is no finished session to copy from yet.");
+      const want = closed[closed.length - 1].attending.filter(pid => st.players[pid] && st.players[pid].active);
+      s.attending.filter(pid => !want.includes(pid)).forEach(pid => removeFromSession(s, pid));
+      want.forEach(pid => { if (!s.attending.includes(pid)) s.attending.push(pid); });
+      return { players: s.attending.length };
+    }
     if (a.on) { for (const pid in st.players) if (st.players[pid].active && !s.attending.includes(pid)) s.attending.push(pid); }
     else { s.attending = []; s.pools = []; s.games = {}; }
   };
