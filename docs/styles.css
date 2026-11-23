@@ -257,6 +257,14 @@ tr.off td { color: var(--muted); }
 table.pg td { white-space: nowrap; }
 .wn { color: var(--good); }
 .ls { color: var(--muted); font-weight: 650; }
+.kpi.tap { position: relative; cursor: pointer; text-decoration: none; color: inherit; font: inherit; padding-right: 26px; }
+.kpi.tap::after { content: "›"; position: absolute; right: 10px; top: 6px; font-size: 20px; line-height: 1; color: var(--muted); }
+.kpi.tap:active { background: var(--soft); }
+.kpi.tap:focus-visible { outline: 3px solid var(--brand); outline-offset: 2px; }
+@keyframes flashring { 0%, 55% { box-shadow: 0 0 0 3px var(--brand); } 100% { box-shadow: 0 0 0 3px transparent; } }
+@keyframes flashrow { 0%, 55% { background: var(--soft); } 100% { background: transparent; } }
+.card.flash { animation: flashring 1.8s ease-out; }
+tr.flash td { animation: flashrow 2.2s ease-out; }
 .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
 .kpi { text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 10px 14px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .kpi .k { font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }

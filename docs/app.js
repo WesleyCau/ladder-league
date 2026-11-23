@@ -440,7 +440,23 @@ function viewPlayer(pid) {
   const gain = x => x.r.end - x.r.start, bestNight = nights.reduce((m, x) => (!m || gain(x) > gain(m) ? x : m), null), worstNight = nights.reduce((m, x) => (!m || gain(x) < gain(m) ? x : m), null);
   const upset = games.filter(x => x.won && x.prob !== null && x.prob < 0.5).reduce((m, x) => (!m || x.prob < m.prob ? x : m), null);
   const plink = id => `<a class="plink" href="#/player/${id}">${esc(nm(id))}</a>`, pct = v => Math.round(v * 100) + "%";
-  const tile = (k, v, d, n) => `<div class="kpi"><span class="k">${k}</span><b class="v num">${v}</b><span class="d">${d}</span>${n ? `<span class="n">${n}</span>` : ""}</div>`;
+  /* a box: go = { player: id } opens that player, { to: element id } scrolls to that part of this page */
+  const tile = (k, v, d, n, go) => {
+    const inner = `<span class="k">${k}</span><b class="v num">${v}</b><span class="d">${d}</span>${n ? `<span class="n">${n}</span>` : ""}`;
+    return go && go.player ? `<a class="kpi tap" href="#/player/${go.player}">${inner}</a>` : go ? `<button class="kpi tap" data-act="jump" data-to="${go.to}">${inner}</button>` : `<div class="kpi">${inner}</div>`;
+  };
+  const names = ids => ids.map(sn).map(esc).join(" / "), when = x => (x.s.status === "closed" ? labels[x.s.id] : "tonight");
+  const rec = o => `${o.w}-${o.l}`, rate = o => o.w / (o.w + o.l);
+  const pick = (map, score, skip) => Object.keys(map).filter(id => id !== skip && score(map[id]) !== null).sort((a, b) => score(map[b]) - score(map[a]) || nm(a).localeCompare(nm(b)))[0];
+  /* scores weigh the count first, then the rate, so 3-0 beats 1-0 and 0-3 is worse than 0-1 */
+  const dream = pick(partners, o => (o.w ? o.w * 10 + rate(o) : null)), jinx = pick(partners, o => (o.l ? o.l * 10 - rate(o) : null), dream);
+  const customer = pick(rivals, o => (o.w ? o.w * 10 + rate(o) : null)), nemesis = pick(rivals, o => (o.l ? o.l * 10 - rate(o) : null), customer);
+  const most = (list, score) => list.reduce((m, x) => (!m || score(x) > score(m) ? x : m), null);
+  const rout = most(games.filter(x => x.won), x => x.sf - x.sa), ouch = most(games.filter(x => !x.won), x => x.sa - x.sf);
+  const banana = most(games.filter(x => !x.won && x.prob !== null && x.prob > 0.5), x => x.prob);
+  const tight = games.filter(x => Math.abs(x.sf - x.sa) === 1), tightW = tight.filter(x => x.won).length;
+  let hot = 0, cold = 0, run = 0;
+  games.forEach(x => { run = x.won ? (run > 0 ? run + 1 : 1) : (run < 0 ? run - 1 : -1); hot = Math.max(hot, run); cold = Math.max(cold, -run); });
   const people = (map, title, note) => {
     const rows = Object.keys(map).sort((a, b) => (map[b].w + map[b].l) - (map[a].w + map[a].l) || map[b].w - map[a].w || nm(a).localeCompare(nm(b)));
     return `<div class="card"><h2>${title}</h2><p class="muted small">${note}</p>${rows.length ? `<div class="scroll"><table><thead><tr><th>Player</th><th class="r">Games</th><th class="r">Won</th><th class="r">Lost</th><th class="r">Win rate</th></tr></thead><tbody>
@@ -452,27 +468,40 @@ function viewPlayer(pid) {
     <div class="head"><h1>${esc(p.name)}</h1>
       <p class="muted">${p.active ? "" : "Dropped out · "}Ranked ${order.indexOf(pid) + 1} of ${order.length} · started at ${levelName(seedLevel(pid))} level (${fmt(p.seed)})${cs && cur[pid] != null ? ` · ${cs.status === "live" ? "in" : "last in"} ${esc(cs.pools[cur[pid]].name)}` : ""}</p></div>
     <div class="kpis">
-      ${tile("Rating", fmt(now), `rank ${order.indexOf(pid) + 1} of ${order.length}`)}
-      ${tile("Since seeding", sgn(moved), `seeded ${fmt(p.seed)}`)}
-      ${tile("Record", `${t.w}-${t.l}`, played ? `${pct(t.w / played)} of ${played} games won` : "no rated games yet")}
-      ${tile("Points", `${t.pf}-${t.pa}`, `${t.pf - t.pa >= 0 ? "+" : "−"}${Math.abs(t.pf - t.pa)} difference`)}
-      ${bestNight ? tile("Best night", sgn(gain(bestNight)), labels[bestNight.c.id], `${bestNight.r.w}-${bestNight.r.l}`) : ""}
-      ${worstNight && nights.length > 1 ? tile("Toughest night", sgn(gain(worstNight)), labels[worstNight.c.id], `${worstNight.r.w}-${worstNight.r.l}`) : ""}
-      ${upset ? tile("Biggest upset", pct(upset.prob), `chance of beating ${upset.theirs.map(sn).map(esc).join(" / ")}`, `won ${upset.sf}-${upset.sa}${upset.partner ? " with " + esc(sn(upset.partner)) : ""}`) : ""}
+      ${tile("Rating", fmt(now), `rank ${order.indexOf(pid) + 1} of ${order.length}`, "", me && hist.labels.length > 1 ? { to: "p-chart" } : null)}
+      ${tile("Since seeding", sgn(moved), `seeded ${fmt(p.seed)}`, "", nights.length ? { to: "p-sessions" } : null)}
+      ${tile("Record", `${t.w}-${t.l}`, played ? `${pct(t.w / played)} of ${played} games won` : "no rated games yet", "", games.length ? { to: "p-games" } : null)}
+      ${tile("Points", `${t.pf}-${t.pa}`, `${t.pf - t.pa >= 0 ? "+" : "−"}${Math.abs(t.pf - t.pa)} difference`, "", games.length ? { to: "p-games" } : null)}
+      ${bestNight ? tile("Best night", sgn(gain(bestNight)), labels[bestNight.c.id], `${bestNight.r.w}-${bestNight.r.l}`, { to: "p-s-" + bestNight.c.id }) : ""}
+      ${worstNight && nights.length > 1 ? tile("Toughest night", sgn(gain(worstNight)), labels[worstNight.c.id], `${worstNight.r.w}-${worstNight.r.l}`, { to: "p-s-" + worstNight.c.id }) : ""}
     </div>
-    ${me && hist.labels.length > 1 ? `<div class="card chartcard"><h2>Rating after each session</h2>${ratingChart(hist, [{ id: pid, slot: 1 }])}
+    ${games.length ? `<h2 class="sub">Bragging rights and excuses</h2>
+    <div class="kpis">
+      ${dream ? tile("Dream team", rec(partners[dream]), `with ${esc(nm(dream))}`, "most wins as partners", { player: dream }) : ""}
+      ${jinx ? tile("It's complicated", rec(partners[jinx]), `with ${esc(nm(jinx))}`, "most losses as partners. Blame the wind.", { player: jinx }) : ""}
+      ${customer ? tile("Favourite customer", rec(rivals[customer]), `against ${esc(nm(customer))}`, "beaten more than anyone else", { player: customer }) : ""}
+      ${nemesis ? tile("Nemesis", rec(rivals[nemesis]), `against ${esc(nm(nemesis))}`, "lost to them more than to anyone else", { player: nemesis }) : ""}
+      ${upset ? tile("Giant killing", pct(upset.prob), `chance of beating ${names(upset.theirs)}`, `won ${upset.sf}-${upset.sa}${upset.partner ? " with " + esc(sn(upset.partner)) : ""}, ${when(upset)}`, { to: "p-g-" + upset.g.id }) : ""}
+      ${banana ? tile("Banana skin", pct(banana.prob), `chance of beating ${names(banana.theirs)}`, `lost ${banana.sf}-${banana.sa} anyway, ${when(banana)}`, { to: "p-g-" + banana.g.id }) : ""}
+      ${rout ? tile(rout.sa === 0 ? "Bagel served" : "Demolition job", `${rout.sf}-${rout.sa}`, `against ${names(rout.theirs)}`, `biggest win, ${when(rout)}`, { to: "p-g-" + rout.g.id }) : ""}
+      ${ouch ? tile(ouch.sf === 0 ? "Bagel eaten" : "Ouch", `${ouch.sf}-${ouch.sa}`, `against ${names(ouch.theirs)}`, `heaviest defeat, ${when(ouch)}. We do not talk about it.`, { to: "p-g-" + ouch.g.id }) : ""}
+      ${tight.length ? tile("Nail-biters", `${tightW}-${tight.length - tightW}`, "in games decided by one point", tightW * 2 > tight.length ? "ice in the veins" : tightW * 2 < tight.length ? "so close, so often" : "could go either way", { to: "p-games" }) : ""}
+      ${hot > 1 ? tile("Hot streak", hot, "wins in a row", "the longest run so far", { to: "p-games" }) : ""}
+      ${cold > 1 ? tile("Cold snap", cold, "losses in a row", "it was probably the balls", { to: "p-games" }) : ""}
+    </div>` : ""}
+    ${me && hist.labels.length > 1 ? `<div class="card chartcard" id="p-chart"><h2>Rating after each session</h2>${ratingChart(hist, [{ id: pid, slot: 1 }])}
       <p class="muted small">A coloured line is a session played. A grey dotted line is a week missed, where the rating carries over.</p></div>` : ""}
-    ${nights.length ? `<div class="card"><h2>Session by session</h2><div class="scroll"><table><thead><tr><th>Session</th><th>Pool</th><th class="r">W-L</th><th class="r">Points</th><th class="r">Change</th><th class="r">Rating</th></tr></thead><tbody>
+    ${nights.length ? `<div class="card" id="p-sessions"><h2>Session by session</h2><div class="scroll"><table><thead><tr><th>Session</th><th>Pool</th><th class="r">W-L</th><th class="r">Points</th><th class="r">Change</th><th class="r">Rating</th></tr></thead><tbody>
       <tr class="off"><td>Start</td><td colspan="4">seeded</td><td class="r">${fmt(p.seed)}</td></tr>
       ${closed.map(c => { const r = (recs[c.id] || {})[pid], pool = r && c.pools.find(q => q.id === r.pool);
         return r ? `<tr><td data-v="${closed.indexOf(c)}">${esc(labels[c.id])}</td><td>${esc(pool ? pool.name : "")}</td><td class="r">${r.w}-${r.l}</td><td class="r">${r.pf}-${r.pa}</td><td class="r"><span class="${r.end < r.start ? "dn" : "up"}">${sgn(r.end - r.start)}</span></td><td class="r"><b>${fmt(r.end)}</b></td></tr>`
           : `<tr class="off"><td>${esc(labels[c.id])}</td><td colspan="5">did not play</td></tr>`; }).join("")}</tbody></table></div></div>` : ""}
     <div class="pools">${people(partners, "Partners", "How this player has done with each partner.")}${people(rivals, "Opponents", "How this player has done against each opponent.")}</div>
     ${bySession.length ? bySession.slice().reverse().map(({ s, rows }) => { const r = (recs[s.id] || {})[pid], won = rows.filter(x => x.won).length;
-      return `<div class="card"><div class="row spread"><h2>${s.status === "closed" ? esc(labels[s.id]) : niceDate(s.date) + " (in progress)"} <span class="muted num">${esc(rows[0].pool.name)} · ${won}-${rows.length - won}</span></h2>
+      return `<div class="card" id="p-s-${s.id}"><div class="row spread"><h2>${s.status === "closed" ? esc(labels[s.id]) : niceDate(s.date) + " (in progress)"} <span class="muted num">${esc(rows[0].pool.name)} · ${won}-${rows.length - won}</span></h2>
           ${r ? `<span class="num"><span class="${r.end < r.start ? "dn" : "up"}">${sgn(r.end - r.start)}</span> to <b>${fmt(r.end)}</b></span>` : '<span class="muted small">not rated until the session is finished</span>'}</div>
         <div class="scroll"><table class="pg"><thead><tr><th>Rd</th><th>Partner</th><th>Opponents</th><th>Result</th><th class="r">Win chance</th><th class="r">Rating</th></tr></thead><tbody>
-          ${rows.map(x => `<tr><td>${x.g.round + 1}</td><td>${x.partner ? plink(x.partner) : ""}</td><td>${x.theirs.map(plink).join(" / ")}</td><td data-v="${x.sf - x.sa}"><b class="${x.won ? "wn" : "ls"}">${x.won ? "Won" : "Lost"}</b> ${x.sf}-${x.sa}</td>
+          ${rows.map(x => `<tr id="p-g-${x.g.id}"><td>${x.g.round + 1}</td><td>${x.partner ? plink(x.partner) : ""}</td><td>${x.theirs.map(plink).join(" / ")}</td><td data-v="${x.sf - x.sa}"><b class="${x.won ? "wn" : "ls"}">${x.won ? "Won" : "Lost"}</b> ${x.sf}-${x.sa}</td>
             <td class="r">${x.prob === null ? "" : pct(x.prob)}</td><td class="r">${x.change === null ? "" : `<span class="${x.change < 0 ? "dn" : "up"}">${sgn(x.change)}</span>`}</td></tr>`).join("")}</tbody></table></div></div>`; }).join("")
       : '<p class="muted">No games played yet.</p>'}
     ${games.some(x => x.prob !== null) ? '<p class="muted small">Win chance is what the ratings gave this pair going into the game, and Rating is what the game was worth, both averaged over every order the night\'s rounds could have been played in.</p>' : ""}`;
@@ -1092,6 +1121,13 @@ const A = {
   hl: d => togglePlayer(d.pid),
   hon: d => togglePlayer(d.pid, true),
   player: d => { location.hash = "#/player/" + d.pid; },
+  /* a box on the player page: scroll to the part it is about and flash it */
+  jump: d => {
+    const el = d.to === "p-games" ? document.querySelector('[id^="p-s-"]') : document.getElementById(d.to);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: el.tagName === "TR" ? "center" : "start" });
+    el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
+  },
   hfilter: d => {
     const hs = app.hs; if (!hs) return;
     if (hs.custom) { hs.start = []; hs.now = []; hs.custom = false; }
