@@ -161,7 +161,7 @@ function fillBoard() {
 /* ---------- shared pieces ---------- */
 function shell(body) {
   const s = openSess(), route = location.hash.split("/")[1] || "";
-  const link = (href, key, ico, label) => `<a href="${href}" ${route === key ? 'aria-current="page"' : ""}><span class="ico" aria-hidden="true">${ico}</span>${label}</a>`;
+  const link = (href, key, ico, label) => `<a href="${href}" ${route === key || (key === "standings" && route === "player") ? 'aria-current="page"' : ""}><span class="ico" aria-hidden="true">${ico}</span>${label}</a>`;
   return `
   <header class="top"><div class="top-in">
     <div class="top-l"><div class="brand">${esc(app.st.league.name)}</div>${s && s.status === "live" ? '<span class="live-dot">Live</span>' : ""}</div>
@@ -396,14 +396,14 @@ function ratingBoard(last, hist) {
   const games = closedSess().reduce((n, x) => n + Object.values(x.games).filter(g => g.status === "done").length, 0);
   const poolOf = id => { const p = last && last.pools.find(q => q.players.includes(id)); return p ? p.name : ""; };
   const lastDay = last ? sessLabels()[last.id] : "";
-  return `<p class="muted">All ${ids.length} players after ${games} games. The tick marks where a player was seeded and the dot is their rating now, so the line between them is how far they have moved.${charted.size ? " Tap a player for their history." : ""}</p>
+  return `<p class="muted">All ${ids.length} players after ${games} games. The tick marks where a player was seeded and the dot is their rating now, so the line between them is how far they have moved. Tap a player for their full record.</p>
     <div class="card"><div class="blegend">${seeds.map((x, i) => `<span class="lv${Math.min(3, i)}"><i class="psw"></i>${levelName(i)} start (${(x / 1000).toFixed(1)})</span>`).join("")}<span><i class="tk"></i>Seed</span></div>
     <ol class="lboard">
       <li class="lrow head" aria-hidden="true"><span class="l-rk">#</span><span class="l-nm">Player</span><span class="trk ax">${ticks.map(t => `<span style="left:${pos(t)}">${(t / 1000).toFixed(1)}</span>`).join("")}</span><span class="l-rt">Rating</span><span class="l-ch">${last ? esc(lastDay) : "Change"}</span></li>
       ${ids.map((id, i) => {
         const pl = P(id), r = rating(id), a = Math.min(pl.seed, r), b = Math.max(pl.seed, r), t = app.st.ratings.totals[id] || { w: 0, l: 0 }, rec = lastRec[id], ch = rec ? rec.end - rec.start : null;
         const where = !pl.active ? "dropped out" : rec ? `${esc(poolOf(id) || "played")}, ${lastDay}` : last ? (t.w + t.l ? `missed ${lastDay}` : "yet to play") : "yet to play";
-        return `<li class="lrow lv${Math.min(3, seedLevel(id))}${pl.active ? "" : " off"}${charted.has(id) ? " pickable" : ""}" ${charted.has(id) ? `data-act="history" data-pid="${id}"` : ""}>
+        return `<li class="lrow lv${Math.min(3, seedLevel(id))}${pl.active ? "" : " off"} pickable" data-act="player" data-pid="${id}">
           <span class="l-rk">${i + 1}</span>
           <span class="l-nm"><b>${esc(nm(id))}</b><small><i class="psw"></i>${t.w}-${t.l} · ${where}</small></span>
           <span class="trk">${grid}<i class="cn" style="left:${pos(a)};width:${((b - a) / (hi - lo) * 100).toFixed(2)}%"></i><i class="sd" style="left:${pos(pl.seed)}"></i><i class="dt" style="left:${pos(r)}"></i></span>
@@ -412,6 +412,70 @@ function ratingBoard(last, hist) {
       }).join("")}
     </ol></div>
     <p class="muted">Ratings update when the organiser finishes a session. Every game in a session counts the same, whatever order it was played in.</p>`;
+}
+
+/* ---------- One player ---------- */
+/* Everything the league knows about one player: where they stand, how they got there, who they play well with, every game. */
+function viewPlayer(pid) {
+  const p = app.st.players[pid], back = '<a class="back" href="#/standings">‹ Standings</a>';
+  if (!p) return `${back}<div class="head"><h1>Player not found</h1></div>`;
+  const closed = closedSess(), recs = app.st.ratings.sessions, labels = sessLabels(), rated = app.st.ratings.games || {};
+  const order = Object.keys(app.st.players).sort((a, b) => rating(b) - rating(a) || nm(a).localeCompare(nm(b)));
+  const t = app.st.ratings.totals[pid] || { w: 0, l: 0, pf: 0, pa: 0 }, played = t.w + t.l, now = rating(pid), moved = now - p.seed;
+  const hist = ratingHistory(), me = hist.series.find(x => x.id === pid), cur = currentPools(), cs = currentSession();
+  const live = openSess() && openSess().status === "live" ? openSess() : null;
+  /* every game with a score, oldest first; tonight's count for the lists but not for the rated totals */
+  const games = [], partners = {}, rivals = {};
+  const tally = (map, id, won) => { const o = map[id] || (map[id] = { w: 0, l: 0 }); if (won) o.w++; else o.l++; };
+  for (const s of closed.concat(live ? [live] : [])) for (const pool of s.pools) for (const gid of (pool.rounds || []).flat()) {
+    const g = s.games[gid];
+    if (!g || g.status !== "done" || !(g.t1.includes(pid) || g.t2.includes(pid))) continue;
+    const first = g.t1.includes(pid), mine = first ? g.t1 : g.t2, theirs = first ? g.t2 : g.t1, sf = first ? g.s1 : g.s2, sa = first ? g.s2 : g.s1, r = rated[gid];
+    const row = { s, g, pool, partner: mine.find(x => x !== pid), theirs, sf, sa, won: sf > sa, prob: r ? (first ? r.p1 : 1 - r.p1) : null, change: r ? (first ? r.d1 : r.d2) : null };
+    games.push(row);
+    if (row.partner) tally(partners, row.partner, row.won);
+    theirs.forEach(o => tally(rivals, o, row.won));
+  }
+  const nights = closed.map(c => ({ c, r: (recs[c.id] || {})[pid] })).filter(x => x.r);
+  const gain = x => x.r.end - x.r.start, bestNight = nights.reduce((m, x) => (!m || gain(x) > gain(m) ? x : m), null), worstNight = nights.reduce((m, x) => (!m || gain(x) < gain(m) ? x : m), null);
+  const upset = games.filter(x => x.won && x.prob !== null && x.prob < 0.5).reduce((m, x) => (!m || x.prob < m.prob ? x : m), null);
+  const plink = id => `<a class="plink" href="#/player/${id}">${esc(nm(id))}</a>`, pct = v => Math.round(v * 100) + "%";
+  const tile = (k, v, d, n) => `<div class="kpi"><span class="k">${k}</span><b class="v num">${v}</b><span class="d">${d}</span>${n ? `<span class="n">${n}</span>` : ""}</div>`;
+  const people = (map, title, note) => {
+    const rows = Object.keys(map).sort((a, b) => (map[b].w + map[b].l) - (map[a].w + map[a].l) || map[b].w - map[a].w || nm(a).localeCompare(nm(b)));
+    return `<div class="card"><h2>${title}</h2><p class="muted small">${note}</p>${rows.length ? `<div class="scroll"><table><thead><tr><th>Player</th><th class="r">Games</th><th class="r">Won</th><th class="r">Lost</th><th class="r">Win rate</th></tr></thead><tbody>
+      ${rows.map(id => `<tr><td>${plink(id)}</td><td class="r">${map[id].w + map[id].l}</td><td class="r">${map[id].w}</td><td class="r">${map[id].l}</td><td class="r">${pct(map[id].w / (map[id].w + map[id].l))}</td></tr>`).join("")}</tbody></table></div>` : '<p class="muted">No games yet.</p>'}</div>`;
+  };
+  const bySession = [];
+  games.forEach(x => { const last = bySession[bySession.length - 1]; if (last && last.s === x.s) last.rows.push(x); else bySession.push({ s: x.s, rows: [x] }); });
+  return `${back}
+    <div class="head"><h1>${esc(p.name)}</h1>
+      <p class="muted">${p.active ? "" : "Dropped out · "}Ranked ${order.indexOf(pid) + 1} of ${order.length} · started at ${levelName(seedLevel(pid))} level (${fmt(p.seed)})${cs && cur[pid] != null ? ` · ${cs.status === "live" ? "in" : "last in"} ${esc(cs.pools[cur[pid]].name)}` : ""}</p></div>
+    <div class="kpis">
+      ${tile("Rating", fmt(now), `rank ${order.indexOf(pid) + 1} of ${order.length}`)}
+      ${tile("Since seeding", sgn(moved), `seeded ${fmt(p.seed)}`)}
+      ${tile("Record", `${t.w}-${t.l}`, played ? `${pct(t.w / played)} of ${played} games won` : "no rated games yet")}
+      ${tile("Points", `${t.pf}-${t.pa}`, `${t.pf - t.pa >= 0 ? "+" : "−"}${Math.abs(t.pf - t.pa)} difference`)}
+      ${bestNight ? tile("Best night", sgn(gain(bestNight)), labels[bestNight.c.id], `${bestNight.r.w}-${bestNight.r.l}`) : ""}
+      ${worstNight && nights.length > 1 ? tile("Toughest night", sgn(gain(worstNight)), labels[worstNight.c.id], `${worstNight.r.w}-${worstNight.r.l}`) : ""}
+      ${upset ? tile("Biggest upset", pct(upset.prob), `chance of beating ${upset.theirs.map(sn).map(esc).join(" / ")}`, `won ${upset.sf}-${upset.sa}${upset.partner ? " with " + esc(sn(upset.partner)) : ""}`) : ""}
+    </div>
+    ${me && hist.labels.length > 1 ? `<div class="card chartcard"><h2>Rating after each session</h2>${ratingChart(hist, [{ id: pid, slot: 1 }])}
+      <p class="muted small">A coloured line is a session played. A grey dotted line is a week missed, where the rating carries over.</p></div>` : ""}
+    ${nights.length ? `<div class="card"><h2>Session by session</h2><div class="scroll"><table><thead><tr><th>Session</th><th>Pool</th><th class="r">W-L</th><th class="r">Points</th><th class="r">Change</th><th class="r">Rating</th></tr></thead><tbody>
+      <tr class="off"><td>Start</td><td colspan="4">seeded</td><td class="r">${fmt(p.seed)}</td></tr>
+      ${closed.map(c => { const r = (recs[c.id] || {})[pid], pool = r && c.pools.find(q => q.id === r.pool);
+        return r ? `<tr><td>${esc(labels[c.id])}</td><td>${esc(pool ? pool.name : "")}</td><td class="r">${r.w}-${r.l}</td><td class="r">${r.pf}-${r.pa}</td><td class="r"><span class="${r.end < r.start ? "dn" : "up"}">${sgn(r.end - r.start)}</span></td><td class="r"><b>${fmt(r.end)}</b></td></tr>`
+          : `<tr class="off"><td>${esc(labels[c.id])}</td><td colspan="5">did not play</td></tr>`; }).join("")}</tbody></table></div></div>` : ""}
+    <div class="pools">${people(partners, "Partners", "How this player has done with each partner.")}${people(rivals, "Opponents", "How this player has done against each opponent.")}</div>
+    ${bySession.length ? bySession.slice().reverse().map(({ s, rows }) => { const r = (recs[s.id] || {})[pid], won = rows.filter(x => x.won).length;
+      return `<div class="card"><div class="row spread"><h2>${s.status === "closed" ? esc(labels[s.id]) : niceDate(s.date) + " (in progress)"} <span class="muted num">${esc(rows[0].pool.name)} · ${won}-${rows.length - won}</span></h2>
+          ${r ? `<span class="num"><span class="${r.end < r.start ? "dn" : "up"}">${sgn(r.end - r.start)}</span> to <b>${fmt(r.end)}</b></span>` : '<span class="muted small">not rated until the session is finished</span>'}</div>
+        <div class="scroll"><table class="pg"><thead><tr><th>Rd</th><th>Partner</th><th>Opponents</th><th>Result</th><th class="r">Win chance</th><th class="r">Rating</th></tr></thead><tbody>
+          ${rows.map(x => `<tr><td>${x.g.round + 1}</td><td>${x.partner ? plink(x.partner) : ""}</td><td>${x.theirs.map(plink).join(" / ")}</td><td><b class="${x.won ? "wn" : "ls"}">${x.won ? "Won" : "Lost"}</b> ${x.sf}-${x.sa}</td>
+            <td class="r">${x.prob === null ? "" : pct(x.prob)}</td><td class="r">${x.change === null ? "" : `<span class="${x.change < 0 ? "dn" : "up"}">${sgn(x.change)}</span>`}</td></tr>`).join("")}</tbody></table></div></div>`; }).join("")
+      : '<p class="muted">No games played yet.</p>'}
+    ${games.some(x => x.prob !== null) ? '<p class="muted small">Win chance is what the ratings gave this pair going into the game, and Rating is what the game was worth, both averaged over every order the night\'s rounds could have been played in.</p>' : ""}`;
 }
 
 /* ---------- Rating history ---------- */
@@ -510,7 +574,7 @@ function historyView(hist) {
       <div class="scroll"><table class="wk"><thead><tr><th>Player</th><th class="r">Start</th>${closed.map((c, i) => `<th class="r">${esc(hist.labels[i + 1])}</th>`).join("")}<th class="r">Since start</th></tr></thead><tbody>
         ${shown.map(h => {
           const x = byId[h.id];
-          return `<tr><td>${swatch(h)}${esc(nm(h.id))}</td><td class="r">${fmt(x.vals[0])}</td>${closed.map(c => {
+          return `<tr><td>${swatch(h)}<a class="plink" href="#/player/${h.id}">${esc(nm(h.id))}</a></td><td class="r">${fmt(x.vals[0])}</td>${closed.map(c => {
             const r = (recs[c.id] || {})[h.id], pool = r && c.pools.find(q => q.id === r.pool);
             return r ? `<td class="r"><b>${fmt(r.end)}</b><small><span class="${r.end < r.start ? "dn" : "up"}">${sgn(r.end - r.start)}</span> · ${r.w}-${r.l}${pool ? " · " + esc(pool.name.replace(/^Pool /, "")) : ""}</small></td>` : '<td class="r muted">did not play</td>';
           }).join("")}<td class="r"><span class="${total(x) < 0 ? "dn" : "up"}">${sgn(total(x))}</span></td></tr>`;
@@ -931,7 +995,7 @@ function whenSettled(fn) { if (overlayLeaving) afterOverlay.push(fn); else fn();
 function render() {
   if (!app.st) return;
   const [, route, a, b] = location.hash.split("/");
-  const view = route === "court" ? viewCourt((a || "").toUpperCase()) : route === "board" ? viewBoard() : route === "standings" ? viewStandings() : route === "org" ? viewOrg(a, b) : viewHome();
+  const view = route === "court" ? viewCourt((a || "").toUpperCase()) : route === "board" ? viewBoard() : route === "standings" ? viewStandings() : route === "player" ? viewPlayer(a) : route === "org" ? viewOrg(a, b) : viewHome();
   const focused = document.activeElement && document.activeElement.id, selStart = focused && document.activeElement.selectionStart;
   $("#app").innerHTML = shell(view);
   $("#overlay").innerHTML = app.flow ? viewFlow() : app.dialog ? viewDialog() : "";
@@ -991,7 +1055,7 @@ const A = {
   tab: d => { app.tab = d.tab; render(); },
   hl: d => togglePlayer(d.pid),
   hon: d => togglePlayer(d.pid, true),
-  history: d => { app.hs = { start: [], now: [], custom: true, on: [{ id: d.pid, slot: 1 }] }; app.tab = "history"; render(); toTop(); },
+  player: d => { location.hash = "#/player/" + d.pid; },
   hfilter: d => {
     const hs = app.hs; if (!hs) return;
     if (hs.custom) { hs.start = []; hs.now = []; hs.custom = false; }
