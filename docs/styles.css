@@ -46,6 +46,10 @@ button { cursor: pointer; }
 .fsbtn { border: 1px solid rgba(255, 255, 255, .4); background: transparent; color: var(--on-chrome); border-radius: 10px; min-height: 40px; padding: 6px 14px; font: inherit; font-size: 14px; font-weight: 700; white-space: nowrap; }
 .fsbtn:active { background: rgba(255, 255, 255, .16); }
 .fsbtn:focus-visible { outline: 3px solid var(--brand); outline-offset: 2px; }
+body.kiosk .top, body.kiosk .nav { display: none; }
+body.kiosk { padding-bottom: 0; }
+.kbar { background: var(--chrome); color: var(--on-chrome-2); display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 2px 12px; font-size: 13px; font-weight: 650; border-bottom: 3px solid; border-image: var(--grad) 1; }
+.kbar button { border: 0; background: transparent; color: var(--on-chrome); font: inherit; font-weight: 750; min-height: 30px; padding: 2px 6px; }
 .offline { background: var(--bad); color: #fff; text-align: center; padding: 8px 16px; font-weight: 600; }
 .demo { background: var(--soft); color: var(--ink); text-align: center; padding: 6px 16px; font-weight: 600; font-size: 14px; border-bottom: 1px solid var(--line); }
 .nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; background: var(--surface); border-top: 1px solid var(--line-2); display: flex; padding-bottom: env(safe-area-inset-bottom, 0px); }

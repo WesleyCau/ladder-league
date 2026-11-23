@@ -132,8 +132,15 @@ function poolTable(s, pool) {
 /* ---------- full screen (All courts on the tablet) ---------- */
 const fsOn = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
 const fsCan = () => { const d = document.documentElement; return !!(d.requestFullscreen || d.webkitRequestFullscreen); };
+/* Some tablets (iPads in particular, outside Safari) give web pages no full screen. There the button hides this app's
+   own menus instead, which is the most a page can do, and says how to get the real thing. */
 function fsToggle() {
   const d = document.documentElement;
+  if (!fsCan()) {
+    app.kiosk = !app.kiosk;
+    if (app.kiosk) toast("This browser cannot go fully full screen, so the menus are hidden instead.");
+    return render();
+  }
   try {
     const p = fsOn() ? (document.exitFullscreen || document.webkitExitFullscreen).call(document) : (d.requestFullscreen || d.webkitRequestFullscreen).call(d);
     if (p && p.catch) p.catch(() => toast("This browser would not go full screen."));
@@ -144,11 +151,14 @@ function fsToggle() {
 function shell(body) {
   const s = openSess(), route = location.hash.split("/")[1] || "";
   const link = (href, key, ico, label) => `<a href="${href}" ${route === key ? 'aria-current="page"' : ""}><span class="ico" aria-hidden="true">${ico}</span>${label}</a>`;
+  const kiosk = app.kiosk && route === "board";
+  document.body.classList.toggle("kiosk", !!kiosk);
   return `
+  ${kiosk ? `<div class="kbar"><span>${esc(app.st.league.name)}</span><button data-act="fullscreen">Show menus ✕</button></div>` : ""}
   <header class="top"><div class="top-in">
     <div class="brand">${esc(app.st.league.name)}</div>
     ${s && s.status === "live" ? '<span class="live-dot">Live</span>' : ""}
-    ${route === "board" && fsCan() ? `<button class="fsbtn" data-act="fullscreen">${fsOn() ? "Exit full screen" : "Full screen"}</button>` : ""}
+    ${route === "board" ? `<button class="fsbtn" data-act="fullscreen">${fsOn() ? "Exit full screen" : "Full screen"}</button>` : ""}
     <nav class="nav" aria-label="Main">
       ${link("#/", "", "●", "Tonight")}${link("#/board", "board", "▦", "All courts")}${link("#/standings", "standings", "≡", "Standings")}${link("#/org", "org", "⚙", "Organiser")}
     </nav>
@@ -1153,6 +1163,6 @@ window.addEventListener("popstate", () => {
   if (app.flow || app.dialog) { app.flow = null; app.dialog = null; render(); }      // Back pressed with a screen open: close it
   afterOverlay.splice(0).forEach(fn => fn());
 });
-window.addEventListener("hashchange", () => { app.flow = null; app.err = {}; app.dialog = null; app.confirm = null; app.sel = null; app.edit = null; window.scrollTo(0, 0); render(); });
+window.addEventListener("hashchange", () => { app.kiosk = false; app.flow = null; app.err = {}; app.dialog = null; app.confirm = null; app.sel = null; app.edit = null; window.scrollTo(0, 0); render(); });
 
 boot();
