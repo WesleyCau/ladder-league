@@ -28,6 +28,11 @@ html, body { margin: 0; }
 html { touch-action: manipulation; }
 html:fullscreen body { touch-action: pan-x pan-y; }
 html:-webkit-full-screen body { touch-action: pan-x pan-y; }
+/* in full screen the page is pinned and the app scrolls inside it: an iPad stops responding once a full screen page itself has scrolled */
+html:fullscreen, html:fullscreen body { height: 100%; overflow: hidden; overscroll-behavior: none; }
+html:-webkit-full-screen, html:-webkit-full-screen body { height: 100%; overflow: hidden; overscroll-behavior: none; }
+html:fullscreen #app { height: 100%; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+html:-webkit-full-screen #app { height: 100%; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
 body { background: var(--bg); color: var(--ink); font: 18px/1.4 Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px)); }
 h1, h2, h3, p { margin: 0; }
 h1 { font-size: clamp(26px, 5vw, 34px); line-height: 1.08; letter-spacing: -0.02em; font-weight: 800; }

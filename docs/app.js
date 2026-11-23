@@ -156,7 +156,7 @@ function fillBoard() {
   const cards = Math.max(0, ...stacks.map(e => e.querySelectorAll(".bmatch").length));
   if (!cards) return;
   /* measured against the page, not the part of it on screen, so a scrolled or zoomed tablet gets the same answer */
-  const spare = document.documentElement.clientHeight - Math.max(...stacks.map(e => e.getBoundingClientRect().bottom + window.scrollY)) - 22;      // 22: the page's own bottom margin, so nothing scrolls
+  const spare = document.documentElement.clientHeight - Math.max(...stacks.map(e => e.getBoundingClientRect().bottom + window.scrollY + $("#app").scrollTop)) - 22;      // 22: the page's own bottom margin, so nothing scrolls
   if (spare > 4) board.style.setProperty("--grow", Math.min(26, Math.floor(spare / (4 * cards) * 10) / 10) + "px");
 }
 
@@ -1173,12 +1173,14 @@ window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer
 /* Going into or out of full screen: back to the top and back to normal size. On an iPad a page that was zoomed even
    slightly (a double tap does it) stays zoomed in full screen, which pushes the top bar and both edges off the screen. */
 const VIEWPORT = "width=device-width, initial-scale=1, viewport-fit=cover";
+/* In full screen the page itself never scrolls (on an iPad a scrolled full screen page stops responding): the app scrolls inside it. */
+function toTop() { window.scrollTo(0, 0); const a = $("#app"); if (a) a.scrollTop = 0; }
 function fsChanged() {
   const meta = document.querySelector('meta[name="viewport"]');
   if (meta) meta.setAttribute("content", VIEWPORT + (fsOn() ? ", minimum-scale=1, maximum-scale=1, user-scalable=no" : ""));
-  window.scrollTo(0, 0);
+  toTop();
   render();
-  setTimeout(() => { window.scrollTo(0, 0); render(); }, 350);       // again once the screen has finished resizing
+  setTimeout(() => { toTop(); render(); }, 350);       // again once the screen has finished resizing
 }
 document.addEventListener("fullscreenchange", fsChanged);
 document.addEventListener("webkitfullscreenchange", fsChanged);
@@ -1188,6 +1190,6 @@ window.addEventListener("popstate", () => {
   if (app.flow || app.dialog) { app.flow = null; app.dialog = null; render(); }      // Back pressed with a screen open: close it
   afterOverlay.splice(0).forEach(fn => fn());
 });
-window.addEventListener("hashchange", () => { app.flow = null; app.err = {}; app.dialog = null; app.confirm = null; app.sel = null; app.edit = null; window.scrollTo(0, 0); render(); });
+window.addEventListener("hashchange", () => { app.flow = null; app.err = {}; app.dialog = null; app.confirm = null; app.sel = null; app.edit = null; toTop(); render(); });
 
 boot();
