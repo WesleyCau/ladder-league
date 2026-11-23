@@ -13,6 +13,7 @@ import itertools
 import math
 
 K_ELO = 100
+BASE_POINTS = 11        # the score bonus is worked out for a game to 11; longer or shorter games are scaled to it
 K_PROB = 8.988
 MAX_EXACT_ROUNDS = 9      # 9! = 362,880 orders; beyond that, sample. Must match docs/core.js
 SAMPLE_ORDERS = 20000
@@ -53,7 +54,8 @@ def _sampled_orders(n):
 
 
 def all_orders(start, rounds):
-    """start: {pid: rating}. rounds: [[(gid, win_pair, lose_pair, ws, ls), ...], ...].
+    """start: {pid: rating}. rounds: [[(gid, win_pair, lose_pair, ws, ls, bw, bl), ...], ...].
+    bw and bl are the winners' and losers' score bonus (ws - ls and ls for a game to 11); they may be left off.
 
     Returns ({pid: mean end rating}, {gid: (mean winners' prob, mean winners' change, mean losers' change)})."""
     players = sorted({p for rd in rounds for g in rd for p in g[1] + g[2]})
@@ -62,7 +64,8 @@ def all_orders(start, rounds):
         return _cache[key]
     idx = {p: i for i, p in enumerate(players)}
     base = [start[p] for p in players]
-    rds = [[(k, idx[g[1][0]], idx[g[1][1]], idx[g[2][0]], idx[g[2][1]], g[3], g[4]) for k, g in enumerate(rd)] for rd in rounds]
+    rds = [[(k, idx[g[1][0]], idx[g[1][1]], idx[g[2][0]], idx[g[2][1]], g[5] if len(g) > 5 else g[3] - g[4], g[6] if len(g) > 6 else g[4])
+            for k, g in enumerate(rd)] for rd in rounds]
     sums = [[[0.0, 0.0, 0.0] for _ in rd] for rd in rounds]
     total = [0.0] * len(players)
     if len(rounds) <= MAX_EXACT_ROUNDS:
@@ -75,10 +78,10 @@ def all_orders(start, rounds):
         r = base[:]
         for i in order:
             acc = sums[i]
-            for k, a, b, c, d, ws, ls in rds[i]:
+            for k, a, b, c, d, bw, bl in rds[i]:
                 prob = 1 / (1 + exp(-K_PROB * (r[a] + r[b] - r[c] - r[d]) / 2000))
                 elo = math.floor(K_ELO * (1 - prob) + 0.5)
-                dw, dl = elo + ws - ls, ls - elo
+                dw, dl = elo + bw, bl - elo
                 r[a] += dw
                 r[b] += dw
                 r[c] += dl
@@ -110,6 +113,7 @@ def compute(state):
         start = dict(rating)
         for pool in sess["pools"]:
             rounds = []
+            target = pool.get("target") or sess.get("pointsToWin") or BASE_POINTS
             for rd in pool.get("rounds", []):
                 games = []
                 for gid in rd:
@@ -117,10 +121,11 @@ def compute(state):
                     if g["status"] != "done" or g["s1"] == g["s2"]:
                         continue
                     t1, t2 = tuple(g["t1"]), tuple(g["t2"])
-                    if g["s1"] > g["s2"]:
-                        games.append((gid, t1, t2, g["s1"], g["s2"]))
-                    else:
-                        games.append((gid, t2, t1, g["s2"], g["s1"]))
+                    win, lose, ws, ls = (t1, t2, g["s1"], g["s2"]) if g["s1"] > g["s2"] else (t2, t1, g["s2"], g["s1"])
+                    if target == BASE_POINTS:
+                        games.append((gid, win, lose, ws, ls))
+                    else:       # a game to 15 or 21 has more points in it: scale the bonus to what a game to 11 is worth
+                        games.append((gid, win, lose, ws, ls, rnd((ws - ls) * BASE_POINTS / target), rnd(ls * BASE_POINTS / target)))
                 if games:
                     rounds.append(games)
             if not rounds:
@@ -130,7 +135,7 @@ def compute(state):
                 rating[pid] = rnd(v)
                 rec[pid] = dict(pool=pool["id"], start=start[pid], end=rating[pid], w=0, l=0, pf=0, pa=0)
             for rd in rounds:
-                for gid, win, lose, ws, ls in rd:
+                for gid, win, lose, ws, ls in (g[:5] for g in rd):
                     prob, dw, dl = gmean[gid]
                     t1_won = sess["games"][gid]["s1"] > sess["games"][gid]["s2"]
                     game_out[gid] = dict(p1=round(prob if t1_won else 1 - prob, 4),

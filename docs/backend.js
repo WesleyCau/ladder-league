@@ -101,7 +101,7 @@ const Backends = (() => {
     }[e && e.code] || "Could not sign in. Try again.");
 
     async function scoreLive(type, args, sess) {
-      const target = (sess && sess.pointsToWin) || state.league.pointsToWin;
+      const game = sess && sess.games[args.gid], target = sess ? Ladder.targetOf(state, sess, game && sess.pools.find(p => p.id === game.pool)) : state.league.pointsToWin;
       let stop = null;
       try {
         if (type === "game.score") Ladder.checkScore(args);

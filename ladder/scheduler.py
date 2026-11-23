@@ -25,6 +25,29 @@ def round_count(n, target=TARGET_GAMES):
     return best[1]
 
 
+TARGETS = (11, 15, 21)
+
+
+def pool_count(n):
+    """How many pools for n players: the fewest with nobody over 9; if that leaves a pool under 8, one fewer (10s and 11s)."""
+    k = max(1, -(-n // 9))
+    if k > 1 and n // k < 8 and -(-n // (k - 1)) <= 11:
+        k -= 1
+    return k
+
+
+def suggest_target(n, base):
+    """What a pool of n plays to, so it finishes with a pool of eight playing to base. A tie goes to the shorter game."""
+    if base not in TARGETS or not MIN_POOL <= n <= MAX_POOL:
+        return base
+    budget, rounds = round_count(8) * base, round_count(n)
+    best = TARGETS[0]
+    for t in TARGETS[1:]:
+        if abs(rounds * t - budget) < abs(rounds * best - budget):
+            best = t
+    return best
+
+
 def _counts(n, rounds):
     partner = [[0] * n for _ in range(n)]
     oppose = [[0] * n for _ in range(n)]

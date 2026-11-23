@@ -23,10 +23,12 @@
 
   /* ---------------- rating engine ---------------- */
   const K_ELO = 100, K_PROB = 8.988, MAX_EXACT_ROUNDS = 9, SAMPLE_ORDERS = 20000;
+  const BASE_POINTS = 11;      // the score bonus is worked out for a game to 11; longer or shorter games are scaled to it
   const rnd = x => Math.floor(x + 0.5);
   const cache = new Map();
 
-  /* start: {pid: rating}. rounds: [[{gid, win:[a,b], lose:[c,d], ws, ls}]].
+  /* start: {pid: rating}. rounds: [[{gid, win:[a,b], lose:[c,d], ws, ls, bw?, bl?}]]: bw and bl are the winners' and
+     losers' score bonus when the game was not to 11 (otherwise ws - ls and ls).
      Replays the rounds in every order and averages. Returns {ends: {pid: mean}, games: {gid: [prob, dw, dl]}}. */
   function allOrders(start, rounds) {
     const players = [...new Set(rounds.flat().flatMap(g => g.win.concat(g.lose)))].sort();
@@ -34,7 +36,7 @@
     if (cache.has(key)) return cache.get(key);
     const idx = new Map(players.map((p, i) => [p, i]));
     const base = players.map(p => start[p]);
-    const rds = rounds.map(rd => rd.map(g => [idx.get(g.win[0]), idx.get(g.win[1]), idx.get(g.lose[0]), idx.get(g.lose[1]), g.ws, g.ls]));
+    const rds = rounds.map(rd => rd.map(g => [idx.get(g.win[0]), idx.get(g.win[1]), idx.get(g.lose[0]), idx.get(g.lose[1]), g.bw != null ? g.bw : g.ws - g.ls, g.bl != null ? g.bl : g.ls]));
     const sums = rounds.map(rd => rd.map(() => [0, 0, 0]));
     const total = new Array(players.length).fill(0);
     const n = rounds.length, r = new Array(players.length);
@@ -47,7 +49,7 @@
           const g = games[k];
           const prob = 1 / (1 + Math.exp(-K_PROB * (r[g[0]] + r[g[1]] - r[g[2]] - r[g[3]]) / 2000));
           const elo = Math.floor(K_ELO * (1 - prob) + 0.5);
-          const dw = elo + g[4] - g[5], dl = g[5] - elo;
+          const dw = elo + g[4], dl = g[5] - elo;
           r[g[0]] += dw; r[g[1]] += dw; r[g[2]] += dl; r[g[3]] += dl;
           const s = acc[k]; s[0] += prob; s[1] += dw; s[2] += dl;
         }
@@ -88,13 +90,16 @@
     for (const sess of closed) {
       const rec = {}, start = Object.assign({}, rating);
       for (const pool of sess.pools) {
-        const rounds = [];
+        const rounds = [], T = pool.target || sess.pointsToWin || BASE_POINTS;
         for (const rd of pool.rounds || []) {
           const games = [];
           for (const gid of rd) {
             const g = sess.games[gid];
             if (!g || g.status !== "done" || g.s1 === g.s2) continue;
-            games.push(g.s1 > g.s2 ? { gid, win: g.t1, lose: g.t2, ws: g.s1, ls: g.s2 } : { gid, win: g.t2, lose: g.t1, ws: g.s2, ls: g.s1 });
+            const w = g.s1 > g.s2 ? { gid, win: g.t1, lose: g.t2, ws: g.s1, ls: g.s2 } : { gid, win: g.t2, lose: g.t1, ws: g.s2, ls: g.s1 };
+            /* a game to 15 or 21 has more points in it: scale the bonus so it is worth what a game to 11 is */
+            if (T !== BASE_POINTS) { w.bw = rnd((w.ws - w.ls) * BASE_POINTS / T); w.bl = rnd(w.ls * BASE_POINTS / T); }
+            games.push(w);
           }
           if (games.length) rounds.push(games);
         }
@@ -128,6 +133,21 @@
       if (!best || key[0] < best.key[0] || (key[0] === best.key[0] && key[1] < best.key[1])) best = { key, rounds };
     }
     return best.rounds;
+  }
+  /* How many pools for n players: the fewest with nobody over 9, so pools are 8s and 9s. If that would leave a pool
+     under 8 (28 to 31 players, say), one pool fewer: 10s and 11s on two courts beat 7s playing one game at a time. */
+  function poolCount(n) {
+    let k = Math.max(1, Math.ceil(n / 9));
+    if (k > 1 && Math.floor(n / k) < 8 && Math.ceil(n / (k - 1)) <= 11) k--;
+    return k;
+  }
+  /* What a pool of n plays to, so it finishes at about the same time as a pool of eight playing to base. Playing time is
+     taken as rounds x points. Only 11, 15 and 21 are offered; a tie goes to the shorter game. */
+  const TARGETS = [11, 15, 21];
+  function suggestTarget(n, base) {
+    if (!TARGETS.includes(base) || n < MIN_POOL || n > MAX_POOL) return base;
+    const budget = roundCount(8) * base, rounds = roundCount(n);
+    return TARGETS.reduce((best, t) => (Math.abs(rounds * t - budget) < Math.abs(rounds * best - budget) ? t : best));
   }
   function counts(n, rounds) {
     const partner = Array.from({ length: n }, () => new Array(n).fill(0)), oppose = Array.from({ length: n }, () => new Array(n).fill(0));
@@ -283,14 +303,15 @@
     for (const pool of s.pools) if (pool.players.includes(pid)) { pool.players = pool.players.filter(p => p !== pid); clearSchedule(s); }
   }
 
+  function pointsOf(value) {
+    const raw = String(value).trim(), pts = /^\d+$/.test(raw) ? parseInt(raw, 10) : NaN;
+    if (!(pts >= 5 && pts <= 21)) fail("invalid", "Points to win must be a whole number from 5 to 21.");
+    return pts;
+  }
   H["league.update"] = (st, a) => {
     if ("name" in a) { const name = String(a.name).trim(); if (!name) fail("invalid", "League name cannot be empty."); st.league.name = name.slice(0, 80); }
     if ("nameStyle" in a) { if (a.nameStyle !== "short" && a.nameStyle !== "full") fail("invalid", "Choose short or full names."); st.league.nameStyle = a.nameStyle; }
-    if ("pointsToWin" in a) {
-      const raw = String(a.pointsToWin).trim(), pts = /^\d+$/.test(raw) ? parseInt(raw, 10) : NaN;
-      if (!(pts >= 5 && pts <= 21)) fail("invalid", "Points to win must be a whole number from 5 to 21.");
-      st.league.pointsToWin = pts;
-    }
+    if ("pointsToWin" in a) st.league.pointsToWin = pointsOf(a.pointsToWin);
   };
   H["player.add"] = (st, a) => {
     const name = checkName(st, a.name), seed = seedOf(a.seed != null ? a.seed : st.league.seeds[st.league.seeds.length - 1] / 1000);
@@ -352,7 +373,7 @@
   H["session.assign"] = (st, a) => {
     const s = getSession(st, a.sid, "setup"), ranked = s.attending.slice().sort(byRating(st)), n = ranked.length;
     if (n < MIN_POOL) fail("few", `At least ${MIN_POOL} players are needed.`);
-    let k = a.pools ? parseInt(a.pools, 10) : Math.max(1, Math.floor(n / st.league.poolSize + 0.5));
+    let k = a.pools ? parseInt(a.pools, 10) : poolCount(n);
     k = Math.max(1, Math.min(k, Math.floor(n / MIN_POOL), 12));
     while (Math.ceil(n / k) > MAX_POOL) k++;
     const courts = {};
@@ -361,7 +382,8 @@
     let at = 0;
     for (let i = 0; i < k; i++) {
       const count = base + (i < extra ? 1 : 0), id = String.fromCharCode(65 + i);
-      pools.push({ id, name: "Pool " + id, courts: courts[id] || 1, confirmed: 0, players: ranked.slice(at, at + count), rounds: [] });
+      /* a pool of 8 or more plays two games a round, so it gets two courts unless the organiser gave it three */
+      pools.push({ id, name: "Pool " + id, courts: count < 8 ? 1 : Math.max(courts[id] || 0, 2), confirmed: 0, players: ranked.slice(at, at + count), rounds: [] });
       at += count;
     }
     s.pools = pools; s.games = {};
@@ -385,6 +407,18 @@
       s2.pools.pop(); return;
     }
     if ("courts" in a) { const c = parseInt(a.courts, 10); if (!(c >= 1 && c <= 3)) fail("invalid", "A pool can use 1 to 3 courts."); pool.courts = c; }
+    if ("target" in a) {
+      /* what this pool plays to. "auto" hands it back to the session's setting; once a pool has scores it stays as it is */
+      if (Object.values(s.games).some(g => g.pool === pool.id && g.status === "done")) fail("scores", `${pool.name} already has scores, so what it plays to cannot change.`);
+      if (a.target === "auto" || a.target === null || a.target === "") { if (s.status !== "setup") fail("status", "Choose 11, 15 or 21."); delete pool.target; }
+      else pool.target = pointsOf(a.target);
+    }
+  };
+  /* What a pool of eight plays to in this session. Every pool goes back to automatic: other sizes follow so all finish together. */
+  H["session.target"] = (st, a) => {
+    const s = getSession(st, a.sid, "setup");
+    s.pointsToWin = pointsOf(a.points);
+    s.pools.forEach(p => { delete p.target; });
   };
   H["session.schedule"] = (st, a) => {
     const s = getSession(st, a.sid, "setup");
@@ -405,11 +439,25 @@
   H["session.start"] = (st, a, org) => {
     const s = getSession(st, a.sid, "setup");
     if (!Object.keys(s.games).length) H["session.schedule"](st, a, org);
+    /* the session and each pool keep the target they started with, whatever the league setting does later */
+    const base = s.pointsToWin || st.league.pointsToWin;
+    s.pools.forEach(p => { p.target = p.target || suggestTarget(p.players.length, base); });
+    s.pointsToWin = base;
     s.status = "live";
-    s.pointsToWin = st.league.pointsToWin;      // the session keeps the target it started with, whatever the league setting does later
   };
-  const targetOf = (st, s) => s.pointsToWin || st.league.pointsToWin;
-  H["session.unstart"] = (st, a) => { const s = getSession(st, a.sid, "live"); if (doneGames(s).length) fail("scores", "Scores have been entered, so the session cannot go back to setup."); s.status = "setup"; s.pools.forEach(p => { p.confirmed = 0; }); };
+  /* What a game in this pool is played to. In setup a pool without its own setting follows the session (or league) setting. */
+  function targetOf(st, s, pool) {
+    const base = s.pointsToWin || st.league.pointsToWin;
+    if (pool && pool.target) return pool.target;
+    return pool && s.status === "setup" ? suggestTarget(pool.players.length, base) : base;
+  }
+  H["session.unstart"] = (st, a) => {
+    const s = getSession(st, a.sid, "live");
+    if (doneGames(s).length) fail("scores", "Scores have been entered, so the session cannot go back to setup.");
+    s.status = "setup";
+    /* a target that is just what automatic gives goes back to automatic; one set by hand stays */
+    s.pools.forEach(p => { p.confirmed = 0; if (p.target === suggestTarget(p.players.length, s.pointsToWin || st.league.pointsToWin)) delete p.target; });
+  };
   /* Back to a fresh start for the same draw: no scores, every pool on round 1. */
   H["session.reset"] = (st, a) => {
     const s = getSession(st, a.sid, "live");
@@ -452,7 +500,7 @@
     delete out.auto;
     return out;
   }
-  H["game.score"] = (st, a, org) => { const { s, g } = getGame(st, a, org); s.games[g.id] = scoreGame(g, a, org, targetOf(st, s)); if (s.status === "closed") recompute(st); };
+  H["game.score"] = (st, a, org) => { const { s, g } = getGame(st, a, org); s.games[g.id] = scoreGame(g, a, org, targetOf(st, s, s.pools.find(p => p.id === g.pool))); if (s.status === "closed") recompute(st); };
   H["game.clear"] = (st, a, org) => {
     const { s, g } = getGame(st, a, org);
     g.s1 = null; g.s2 = null; g.status = s.status === "closed" ? "skipped" : "pending"; delete g.at; delete g.auto;
@@ -521,6 +569,6 @@
     return result;
   }
 
-  Object.assign(L, { rng, allOrders, compute, roundCount, generate, summary, emptyState, normalize, apply, scoreGame, checkScore, roundReady, closeSession,
+  Object.assign(L, { rng, allOrders, compute, roundCount, poolCount, suggestTarget, targetOf, TARGETS, generate, summary, emptyState, normalize, apply, scoreGame, checkScore, roundReady, closeSession,
     ActionError, OPEN_ACTIONS, MIN_POOL, MAX_POOL });
 })(typeof module !== "undefined" && module.exports ? module.exports : (window.Ladder = {}));

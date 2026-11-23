@@ -119,7 +119,10 @@ test("substitute, dropout, uneven attendance, database round trip", () => {
   ["p33", "p34"].forEach(pid => L.apply(st, "session.attend", { sid, pid, on: false }, true));
   ["p1", "p2", "p3"].forEach(pid => L.apply(st, "session.attend", { sid, pid, on: false }, true));
   L.apply(st, "session.assign", { sid }, true);
+  assert.deepStrictEqual(sess.pools.map(p => p.players.length), [10, 10, 9]);      // 29 players: three bigger pools, not four of seven
+  L.apply(st, "session.assign", { sid, pools: 4 }, true);
   assert.deepStrictEqual(sess.pools.map(p => p.players.length), [8, 7, 7, 7]);
+  assert.deepStrictEqual(sess.pools.map(p => p.courts), [2, 1, 1, 1]);
   L.apply(st, "session.start", { sid }, true);
   assert.strictEqual(sess.pools[1].rounds.flat().length, 14);
   const out = sess.pools[3].players[0];
@@ -246,6 +249,58 @@ test("same as last week: attendance copied from the last finished session", () =
   assert.deepStrictEqual(next.attending.slice().sort(), ["p1", "p2", "p3", "p4", "p5", "p6", "p7"]);
   assert.ok(next.pools.every(p => p.players.every(pid => next.attending.includes(pid))));       // nobody left in a pool who is not playing
   throwsCode(() => L.apply(st, "session.attendAll", { sid: sid2, last: true }, false), "pin");
+});
+
+test("pools for any attendance: how many, and what each plays to", () => {
+  const sizes = n => { const k = L.poolCount(n), b = Math.floor(n / k); return Array.from({ length: k }, (_, i) => b + (i < n % k ? 1 : 0)).join(","); };
+  assert.deepStrictEqual([25, 27, 33, 36, 28, 31, 39, 40, 23, 20, 8, 5].map(sizes),
+    ["9,8,8", "9,9,9", "9,8,8,8", "9,9,9,9", "10,9,9", "11,10,10", "10,10,10,9", "8,8,8,8,8", "8,8,7", "10,10", "8", "5"]);
+  const T = L.suggestTarget;
+  assert.deepStrictEqual([8, 9, 10, 11, 12, 7].map(n => T(n, 11)), [11, 11, 11, 11, 11, 11]);
+  assert.deepStrictEqual([8, 9, 10, 11, 12, 7].map(n => T(n, 15)), [15, 11, 11, 11, 15, 11]);
+  assert.deepStrictEqual([8, 9, 10, 11, 12, 7].map(n => T(n, 21)), [21, 15, 15, 15, 21, 11]);
+  assert.strictEqual(T(9, 13), 13);                                              // an unusual league setting is left alone
+
+  const st = league(25);
+  const sid = L.apply(st, "session.create", { date: "2026-11-23" }, true).id, sess = st.sessions[0];
+  L.apply(st, "session.assign", { sid }, true);
+  assert.deepStrictEqual(sess.pools.map(p => p.players.length), [9, 8, 8]);
+  assert.deepStrictEqual(sess.pools.map(p => p.courts), [2, 2, 2]);
+  const targets = () => sess.pools.map(p => L.targetOf(st, sess, p));
+  assert.deepStrictEqual(targets(), [11, 11, 11]);
+  throwsCode(() => L.apply(st, "session.target", { sid, points: 15 }, false), "pin");
+  throwsCode(() => L.apply(st, "session.target", { sid, points: 40 }, true), "invalid");
+  L.apply(st, "session.target", { sid, points: 15 }, true);
+  assert.deepStrictEqual(targets(), [11, 15, 15]);                               // nine rounds to 11 against seven to 15
+  L.apply(st, "session.pool", { sid, pool: "B", target: 21 }, true);
+  assert.deepStrictEqual(targets(), [11, 21, 15]);
+  L.apply(st, "session.pool", { sid, pool: "B", target: "auto" }, true);
+  L.apply(st, "session.pool", { sid, pool: "C", target: 21 }, true);
+  L.apply(st, "session.start", { sid }, true);
+  assert.deepStrictEqual([sess.pointsToWin, ...sess.pools.map(p => p.target)], [15, 11, 15, 21]);
+  const first = i => sess.pools[i].rounds[0][0];
+  throwsCode(() => L.apply(st, "game.score", { sid, gid: first(0), s1: 15, s2: 9 }, false), "invalid");   // Pool A plays to 11
+  L.apply(st, "game.score", { sid, gid: first(1), s1: 15, s2: 9 }, false);
+  throwsCode(() => L.apply(st, "session.pool", { sid, pool: "B", target: 11 }, true), "scores");
+  L.apply(st, "session.pool", { sid, pool: "C", target: 15 }, true);             // running late: no scores in Pool C yet
+  throwsCode(() => L.apply(st, "session.pool", { sid, pool: "C", target: "auto" }, true), "status");
+  L.apply(st, "game.clear", { sid, gid: first(1) }, true);
+  L.apply(st, "session.unstart", { sid }, true);
+  assert.deepStrictEqual(sess.pools.map(p => p.target), [undefined, undefined, undefined]);   // all were what automatic gives
+});
+
+test("a longer game is worth what a game to 11 is", () => {
+  const state = to => {
+    const st = L.emptyState("T");
+    ["a", "b", "c", "d"].forEach(id => { st.players[id] = { id, name: id, seed: 3500, active: true }; });
+    st.sessions.push({ id: "s1", date: "2026-11-23", status: "closed", attending: ["a", "b", "c", "d"], pointsToWin: to,
+      pools: [{ id: "A", name: "Pool A", courts: 1, confirmed: 1, target: to, players: ["a", "b", "c", "d"], rounds: [["g1"]] }],
+      games: { g1: { id: "g1", pool: "A", round: 0, t1: ["a", "b"], t2: ["c", "d"], s1: to, s2: Math.round(to * 0.6), status: "done" } } });
+    return L.compute(st).current;
+  };
+  assert.deepStrictEqual(state(11), { a: 3554, b: 3554, c: 3457, d: 3457 });     // 11-7: 50 + 4, 7 - 50
+  assert.deepStrictEqual(state(15), { a: 3554, b: 3554, c: 3457, d: 3457 });     // 15-9: bonus 6 and 9 become 4 and 7
+  assert.deepStrictEqual(state(21), { a: 3554, b: 3554, c: 3457, d: 3457 });     // 21-13: bonus 8 and 13 become 4 and 7
 });
 
 console.log(`${passed} passed`);

@@ -290,9 +290,61 @@ class StoreTest(unittest.TestCase):
         for pid in sess["attending"][:3]:
             st.apply("session.attend", dict(sid=sid, pid=pid, on=False), org=True)
         st.apply("session.assign", dict(sid=sid), org=True)
+        self.assertEqual([len(p["players"]) for p in sess["pools"]], [10, 10, 9])
+        st.apply("session.assign", dict(sid=sid, pools=4), org=True)
         self.assertEqual([len(p["players"]) for p in sess["pools"]], [8, 7, 7, 7])
+        self.assertEqual([p["courts"] for p in sess["pools"]], [2, 1, 1, 1])
         st.apply("session.schedule", dict(sid=sid), org=True)
         self.assertEqual(sum(len(r) for r in sess["pools"][1]["rounds"]), 14)
+
+    def test_pool_targets(self):
+        st = self.store
+        sid = st.apply("session.create", dict(date="2026-11-23"), org=True)["id"]
+        sess = st.state["sessions"][-1]
+        for pid in sess["attending"][25:]:
+            st.apply("session.attend", dict(sid=sid, pid=pid, on=False), org=True)
+        st.apply("session.assign", dict(sid=sid), org=True)
+        self.assertEqual([len(p["players"]) for p in sess["pools"]], [9, 8, 8])
+        st.apply("session.target", dict(sid=sid, points=15), org=True)
+        st.apply("session.pool", dict(sid=sid, pool="C", target=21), org=True)
+        st.apply("session.start", dict(sid=sid), org=True)
+        self.assertEqual([sess["pointsToWin"]] + [p["target"] for p in sess["pools"]], [15, 11, 15, 21])
+        first = [p["rounds"][0][0] for p in sess["pools"]]
+        with self.assertRaises(ActionError) as cm:
+            st.apply("game.score", dict(sid=sid, gid=first[0], s1=15, s2=9), org=False)
+        self.assertEqual(cm.exception.code, "invalid")
+        st.apply("game.score", dict(sid=sid, gid=first[1], s1=15, s2=9), org=False)
+        with self.assertRaises(ActionError) as cm:
+            st.apply("session.pool", dict(sid=sid, pool="B", target=11), org=True)
+        self.assertEqual(cm.exception.code, "scores")
+        st.apply("session.pool", dict(sid=sid, pool="C", target=15), org=True)
+        st.apply("game.clear", dict(sid=sid, gid=first[1]), org=True)
+        st.apply("session.unstart", dict(sid=sid), org=True)
+        self.assertTrue(all("target" not in p for p in sess["pools"]))
+
+
+class PoolRuleTest(unittest.TestCase):
+    def test_pool_count_and_targets(self):
+        def sizes(n):
+            k = scheduler.pool_count(n)
+            return [n // k + (1 if i < n % k else 0) for i in range(k)]
+        self.assertEqual([sizes(n) for n in (25, 27, 33, 36, 28, 31, 39, 23, 20, 8)],
+                         [[9, 8, 8], [9, 9, 9], [9, 8, 8, 8], [9, 9, 9, 9], [10, 9, 9], [11, 10, 10], [10, 10, 10, 9], [8, 8, 7], [10, 10], [8]])
+        t = scheduler.suggest_target
+        self.assertEqual([t(n, 11) for n in (8, 9, 10, 11, 12, 7)], [11] * 6)
+        self.assertEqual([t(n, 15) for n in (8, 9, 10, 11, 12, 7)], [15, 11, 11, 11, 15, 11])
+        self.assertEqual([t(n, 21) for n in (8, 9, 10, 11, 12, 7)], [21, 15, 15, 15, 21, 11])
+        self.assertEqual(t(9, 13), 13)
+
+    def test_longer_game_is_worth_a_game_to_11(self):
+        """Same three cases and expected ratings as tests/core.test.js."""
+        from ladder import engine
+        for to in (11, 15, 21):
+            state = dict(players={p: dict(id=p, name=p, seed=3500, active=True) for p in "abcd"}, sessions=[dict(
+                id="s1", date="2026-11-23", status="closed", attending=list("abcd"), pointsToWin=to,
+                pools=[dict(id="A", name="Pool A", courts=1, confirmed=1, target=to, players=list("abcd"), rounds=[["g1"]])],
+                games=dict(g1=dict(id="g1", pool="A", round=0, t1=["a", "b"], t2=["c", "d"], s1=to, s2=int(to * 0.6 + 0.5), status="done")))])
+            self.assertEqual(engine.compute(state)["current"], dict(a=3554, b=3554, c=3457, d=3457), to)
 
 
 if __name__ == "__main__":
