@@ -151,11 +151,12 @@ function fillBoard() {
   const board = $(".board");
   if (!board) return;
   board.style.setProperty("--grow", "0px");
-  if (document.documentElement.clientWidth < 900 || window.scrollY > 0) return;
+  if (document.documentElement.clientWidth < 900) return;
   const stacks = [...board.children].filter(e => e.classList.contains("stack"));
   const cards = Math.max(0, ...stacks.map(e => e.querySelectorAll(".bmatch").length));
   if (!cards) return;
-  const spare = window.innerHeight - Math.max(...stacks.map(e => e.getBoundingClientRect().bottom)) - 22;      // 22: the page's own bottom margin, so nothing scrolls
+  /* measured against the page, not the part of it on screen, so a scrolled or zoomed tablet gets the same answer */
+  const spare = document.documentElement.clientHeight - Math.max(...stacks.map(e => e.getBoundingClientRect().bottom + window.scrollY)) - 22;      // 22: the page's own bottom margin, so nothing scrolls
   if (spare > 4) board.style.setProperty("--grow", Math.min(26, Math.floor(spare / (4 * cards) * 10) / 10) + "px");
 }
 
@@ -1169,8 +1170,19 @@ document.addEventListener("touchmove", e => { if (drag.active) e.preventDefault(
 document.addEventListener("contextmenu", e => { if (drag.pid && drag.touch) e.preventDefault(); });
 let resizeTimer = 0;
 window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (!app.flow) render(); }, 150); });
-document.addEventListener("fullscreenchange", () => render());
-document.addEventListener("webkitfullscreenchange", () => render());
+/* Going into or out of full screen: back to the top and back to normal size. On an iPad a page that was zoomed even
+   slightly (a double tap does it) stays zoomed in full screen, which pushes the top bar and both edges off the screen. */
+const VIEWPORT = "width=device-width, initial-scale=1, viewport-fit=cover";
+function fsChanged() {
+  const meta = document.querySelector('meta[name="viewport"]');
+  if (meta) meta.setAttribute("content", VIEWPORT + (fsOn() ? ", minimum-scale=1, maximum-scale=1, user-scalable=no" : ""));
+  window.scrollTo(0, 0);
+  render();
+  setTimeout(() => { window.scrollTo(0, 0); render(); }, 350);       // again once the screen has finished resizing
+}
+document.addEventListener("fullscreenchange", fsChanged);
+document.addEventListener("webkitfullscreenchange", fsChanged);
+document.documentElement.classList.toggle("ios", isIOS());
 window.addEventListener("popstate", () => {
   overlayLeaving = false;
   if (app.flow || app.dialog) { app.flow = null; app.dialog = null; render(); }      // Back pressed with a screen open: close it

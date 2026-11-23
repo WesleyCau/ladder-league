@@ -24,6 +24,10 @@
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; }
+/* quick taps on the score buttons must never zoom the page (a double tap does on tablets); in full screen, no pinch zoom either */
+html { touch-action: manipulation; }
+html:fullscreen body { touch-action: pan-x pan-y; }
+html:-webkit-full-screen body { touch-action: pan-x pan-y; }
 body { background: var(--bg); color: var(--ink); font: 18px/1.4 Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px)); }
 h1, h2, h3, p { margin: 0; }
 h1 { font-size: clamp(26px, 5vw, 34px); line-height: 1.08; letter-spacing: -0.02em; font-weight: 800; }
@@ -40,13 +44,15 @@ button { cursor: pointer; }
 /* chrome */
 .top { background: var(--chrome); color: var(--on-chrome); border-bottom: 4px solid; border-image: var(--grad) 1; }
 /* top bar: league name and Live on the left, Full screen in the middle, the menu on the right */
-.top-in { max-width: 1400px; margin: 0 auto; padding: 9px 12px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; }
+.top-in { max-width: 1400px; margin: 0 auto; padding: calc(9px + env(safe-area-inset-top, 0px)) 12px 9px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; }
 .top-l { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .top-c { justify-self: end; }
 @media (min-width: 700px) { .top-in { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); } .top-c { justify-self: center; } }
 .brand { font-weight: 750; font-size: 16px; letter-spacing: .01em; flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap: 10px; }
 .brand::before { content: ""; width: 14px; height: 14px; border-radius: 50%; background: var(--grad); flex: none; }
 .live-dot { display: inline-flex; align-items: center; background: var(--grad); color: var(--on-brand); font-weight: 800; font-size: 12px; padding: 3px 10px; border-radius: 99px; text-transform: uppercase; letter-spacing: .08em; }
+/* iPad full screen: the status bar and Safari's own close button sit over the top left of the page, so the bar makes room for them */
+html.ios:-webkit-full-screen .top-in { padding-top: max(26px, calc(4px + env(safe-area-inset-top, 0px))); padding-left: 68px; }
 .fsbtn { border: 1px solid rgba(255, 255, 255, .4); background: transparent; color: var(--on-chrome); border-radius: 10px; min-height: 40px; padding: 6px 14px; font: inherit; font-size: 14px; font-weight: 700; white-space: nowrap; }
 .fsbtn:active { background: rgba(255, 255, 255, .16); }
 .fsbtn:focus-visible { outline: 3px solid var(--brand); outline-offset: 2px; }
@@ -411,7 +417,7 @@ a.note { display: block; text-decoration: none; font-weight: 650; }
 
 @media (min-width: 900px) {
   body { padding-bottom: 0; }
-  .top-in { padding: 4px 12px; }
+  .top-in { padding: calc(4px + env(safe-area-inset-top, 0px)) 12px 4px; }
   main { padding-top: 8px; gap: 10px; }
   .board, .draw { grid-template-columns: repeat(var(--n, 4), minmax(0, 1fr)); }
   .board .nx-lines b, .draw .dpair { white-space: nowrap; }
