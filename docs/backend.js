@@ -71,10 +71,13 @@ const Backends = (() => {
 
   /* ---------------- Firebase Realtime Database ---------------- */
   async function firebase(cfg, onState, onOnline) {
-    const base = "https://www.gstatic.com/firebasejs/10.12.2/";
+    const base = cfg.sdkBase || "https://www.gstatic.com/firebasejs/10.12.2/";      // sdkBase: the tests swap in a stand-in database
     const [{ initializeApp }, db, au] = await Promise.all([import(base + "firebase-app.js"), import(base + "firebase-database.js"), import(base + "firebase-auth.js")]);
     const fbApp = initializeApp(cfg), database = db.getDatabase(fbApp), auth = au.getAuth(fbApp);
-    let state = Ladder.emptyState(), admins = {}, user = null, loaded = false;
+    let state = Ladder.emptyState(), admins = {}, user = null, loaded = false, connected = true;
+    const OFFLINE = { ok: false, code: "offline", message: "No connection, so that has not been saved. Try again when the connection is back." };
+    const SLOW = { ok: false, code: "offline", message: "No reply from the database yet. Check the connection, then check the score before entering it again." };
+    const timed = p => Promise.race([p, new Promise(r => setTimeout(() => r(Object.assign({}, SLOW)), 12000))]);
     const open = !!(window.LADDER_CONFIG || {}).openOrganiser;      // no login: the database rules must allow it too
     const isOrg = () => open || !!(user && admins[user.uid]);
     const emit = () => { if (loaded) onState({ state, urls: [] }); };
@@ -84,6 +87,9 @@ const Backends = (() => {
     /* Smallest set of path writes that turns a into b. Lists are written whole. */
     function diff(a, b, path, out) {
       if (isObj(a) && isObj(b)) { for (const k of new Set(Object.keys(a).concat(Object.keys(b)))) diff(a[k], b[k], path ? path + "/" + k : k, out); }
+      /* a list of records of the same length (the pools) is compared record by record, so changing one pool's courts
+         never rewrites another pool's round counter that a phone has just moved on */
+      else if (Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.length && a.every(isObj) && b.every(isObj)) a.forEach((x, i) => diff(x, b[i], path + "/" + i, out));
       else if (JSON.stringify(a) !== JSON.stringify(b)) out[path] = b === undefined ? null : b;
     }
     const authMessage = e => ({
@@ -94,7 +100,8 @@ const Backends = (() => {
       "auth/too-many-requests": "Too many attempts. Wait a minute and try again.",
     }[e && e.code] || "Could not sign in. Try again.");
 
-    async function scoreLive(type, args) {
+    async function scoreLive(type, args, sess) {
+      const target = (sess && sess.pointsToWin) || state.league.pointsToWin;
       let stop = null;
       try {
         if (type === "game.score") Ladder.checkScore(args);
@@ -102,8 +109,8 @@ const Backends = (() => {
           stop = null;
           if (cur === null) return cur;                       // not loaded yet: the database retries with the real value
           try {
-            if (type === "game.clear") { const rest = Object.assign({}, cur); delete rest.s1; delete rest.s2; delete rest.at; rest.status = "pending"; return rest; }
-            return Ladder.scoreGame(Object.assign({ s1: null, s2: null }, cur), args, isOrg());
+            if (type === "game.clear") { const rest = Object.assign({}, cur); delete rest.s1; delete rest.s2; delete rest.at; delete rest.auto; rest.status = "pending"; return rest; }
+            return Ladder.scoreGame(Object.assign({ s1: null, s2: null }, cur), args, isOrg(), target);
           } catch (e) { stop = e; return undefined; }         // abort: nothing is written
         });
         if (stop) return failure(stop);
@@ -135,13 +142,15 @@ const Backends = (() => {
           if (!Object.keys(state.ratings.current).length && Object.keys(state.players).length) state.ratings = Ladder.compute(state);
           loaded = true; emit();
         }, () => onOnline(false));
-        db.onValue(db.ref(database, ".info/connected"), s => { if (loaded) onOnline(!!s.val()); });
+        db.onValue(db.ref(database, ".info/connected"), s => { connected = !!s.val(); if (loaded) onOnline(connected); });
         au.onAuthStateChanged(auth, u => { user = u; emit(); });
       },
-      async send(type, args) {
+      /* Offline, a database write would sit waiting for ever: say so at once, and give up waiting after 12 seconds. */
+      send(type, args) { return connected ? timed(this.sendNow(type, args)) : Promise.resolve(Object.assign({}, OFFLINE)); },
+      async sendNow(type, args) {
         if (type === "game.score" || type === "game.clear" || type === "round.confirm") {
           const sess = state.sessions.find(s => s.id === args.sid);
-          if (sess && sess.status === "live") return type === "round.confirm" ? confirmLive(sess, args) : scoreLive(type, args);
+          if (sess && sess.status === "live") return type === "round.confirm" ? confirmLive(sess, args) : scoreLive(type, args, sess);
         }
         if (!isOrg()) return { ok: false, code: "pin", message: "That needs the organiser to be signed in." };
         if (type === "round.back") {       // write just that pool's round, so other pools' confirms are never overwritten
@@ -153,10 +162,46 @@ const Backends = (() => {
             } catch (e) { return failure(e); }
           }
         }
-        const next = clone(state);
+        if (type === "session.close") {
+          /* Finish inside one database transaction on the session, so a score that lands at the same moment is either
+             in before the session closes or refused after: never marked "not played". Ratings are then worked out
+             from what the database actually holds. */
+          let stop = null;
+          try {
+            const res = await db.runTransaction(db.ref(database, `sessions/${args.sid}`), cur => {
+              stop = null;
+              if (cur === null) return cur;
+              try { return Ladder.closeSession(cur); } catch (e) { stop = e; return undefined; }
+            });
+            if (stop) return failure(stop);
+            if (!res.committed || !res.snapshot.exists()) return { ok: false, code: "missing", message: "Session not found." };
+            const doc = toDb(state);
+            doc.sessions[args.sid] = res.snapshot.val();
+            await db.update(db.ref(database), { ratings: Ladder.compute(Ladder.normalize(doc)), version: (state.version || 0) + 1 });
+            return { ok: true, result: {} };
+          } catch (e) { return failure(e); }
+        }
         try {
-          const result = Ladder.apply(next, type, args, true), out = {};
-          diff(toDb(state), toDb(next), "", out);
+          let base = state, next = clone(state), result = Ladder.apply(next, type, args, true);
+          const zero = { p: 0, s: 0, g: 0 }, mine = Object.assign({}, zero, state.seq), need = {};
+          for (const k in next.seq) if (next.seq[k] !== mine[k]) need[k] = next.seq[k] - (mine[k] || 0);
+          if (Object.keys(need).length) {
+            /* new ids (players, sessions, games) are reserved in the database first, so two organiser devices cannot mint the same one */
+            let seen = null;
+            const res = await db.runTransaction(db.ref(database, "seq"), cur => {
+              seen = Object.assign({}, zero, cur || {});
+              const o = Object.assign({}, seen);
+              for (const k in need) o[k] = (o[k] || 0) + need[k];
+              return o;
+            });
+            if (!res.committed) return { ok: false, code: "error", message: "Something went wrong. Check the connection and try again." };
+            if (JSON.stringify(seen) !== JSON.stringify(mine)) {        // another device used ids since this copy: redo on its numbers
+              base = clone(state); base.seq = seen;
+              next = clone(base); result = Ladder.apply(next, type, args, true);
+            }
+          }
+          const out = {};
+          diff(toDb(base), toDb(next), "", out);
           if (Object.keys(out).length) await db.update(db.ref(database), out);
           return { ok: true, result };
         } catch (e) { return failure(e); }
@@ -196,5 +241,5 @@ const Backends = (() => {
     } catch (e) { /* no server here */ }
     return local(onState);
   }
-  return { pick };
+  return { pick, firebase };
 })();

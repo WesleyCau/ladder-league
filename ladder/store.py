@@ -1,4 +1,5 @@
 """League state: one JSON document, changed only through validated actions."""
+import copy
 import json
 import os
 import shutil
@@ -20,6 +21,23 @@ def empty_state(name="Doubles Ladder League"):
     return dict(version=1, seq=dict(p=0, s=0, g=0),
                 league=dict(name=name, seeds=DEFAULT_SEEDS[:], poolSize=8, pointsToWin=11),
                 players={}, sessions=[], ratings=dict(current={}, sessions={}, games={}, totals={}))
+
+
+def _restore(cur, old):
+    """Put cur back to old in place, keeping the same dict and list objects wherever they still exist."""
+    if isinstance(cur, dict):
+        for k in [k for k in cur if k not in old]:
+            del cur[k]
+        for k, v in old.items():
+            if k in cur and type(cur[k]) is type(v) and isinstance(v, (dict, list)):
+                _restore(cur[k], v)
+            else:
+                cur[k] = v
+    elif len(cur) == len(old) and all(type(c) is type(o) and isinstance(o, (dict, list)) for c, o in zip(cur, old)):
+        for c, o in zip(cur, old):
+            _restore(c, o)
+    else:
+        cur[:] = old
 
 
 class Store:
@@ -97,7 +115,12 @@ class Store:
         with self.lock:
             if kind not in OPEN_ACTIONS and not org:
                 raise ActionError("pin", "Organiser PIN needed.")
-            result = handler(args or {}, org)
+            before = copy.deepcopy(self.state)      # a rejected action must leave nothing behind
+            try:
+                result = handler(args or {}, org)
+            except Exception:
+                _restore(self.state, before)
+                raise
             self.state["version"] += 1
             self.save()
             return result or {}
@@ -115,9 +138,10 @@ class Store:
                 raise ActionError("invalid", "Choose short or full names.")
             lg["nameStyle"] = a["nameStyle"]
         if "pointsToWin" in a:
-            pts = int(a["pointsToWin"])
+            raw = str(a["pointsToWin"]).strip()
+            pts = int(raw) if raw.isdigit() else 0
             if not 5 <= pts <= 21:
-                raise ActionError("invalid", "Points to win must be between 5 and 21.")
+                raise ActionError("invalid", "Points to win must be a whole number from 5 to 21.")
             lg["pointsToWin"] = pts
 
     def _check_name(self, name, skip=None):
@@ -304,6 +328,7 @@ class Store:
         if not sess["games"]:
             self.do_session_schedule(a, org)
         sess["status"] = "live"
+        sess["pointsToWin"] = self.state["league"]["pointsToWin"]
 
     def do_session_unstart(self, a, org):
         sess = self._session(a.get("sid"), "live")
@@ -316,9 +341,11 @@ class Store:
     def do_session_reset(self, a, org):
         """Back to a fresh start for the same draw: no scores, every pool on round 1."""
         sess = self._session(a.get("sid"), "live")
+        self.backup()
         for g in sess["games"].values():
             g.update(s1=None, s2=None, status="pending")
             g.pop("at", None)
+            g.pop("auto", None)
         for pool in sess["pools"]:
             pool["confirmed"] = 0
         return dict(games=len(sess["games"]))
@@ -326,7 +353,9 @@ class Store:
     def do_session_delete(self, a, org):
         sess = self._session(a.get("sid"), "setup", "live")
         if self._done(sess):
-            raise ActionError("scores", "Scores have been entered. Finish the session instead.")
+            if not a.get("force"):
+                raise ActionError("scores", "Scores have been entered. Deleting the session deletes them too.")
+            self.backup()
         self.state["sessions"].remove(sess)
 
     # ---- live session ------------------------------------------------------
@@ -336,6 +365,8 @@ class Store:
             raise ActionError("status", "The session has not started.")
         if sess["status"] == "closed" and not org:
             raise ActionError("pin", "This session is finished. Only the organiser can change it.")
+        if sess["status"] == "closed" and not a.get("history"):
+            raise ActionError("closed", "This session has been finished. Its scores can only be changed from Organiser, History.")
         g = sess["games"].get(a.get("gid"))
         if g is None:
             raise ActionError("missing", "Game not found.")
@@ -349,11 +380,18 @@ class Store:
             raise ActionError("invalid", "Enter both scores.")
         if not (0 <= s1 <= 60 and 0 <= s2 <= 60) or s1 == s2:
             raise ActionError("invalid", "Scores must be different whole numbers.")
+        target = sess.get("pointsToWin") or self.state["league"]["pointsToWin"]
+        if max(s1, s2) > target:
+            raise ActionError("invalid", "Games are first to %d, so the winning score cannot be more than %d." % (target, target))
         if g["status"] == "skipped" and not org:
             raise ActionError("skipped", "This game was marked as not played.")
-        if g["status"] == "done" and not a.get("replace") and (g["s1"], g["s2"]) != (s1, s2):
-            raise ActionError("exists", "Already entered as %d-%d." % (g["s1"], g["s2"]), s1=g["s1"], s2=g["s2"])
+        if g["status"] == "done" and (g["s1"], g["s2"]) != (s1, s2):
+            was = a.get("was")
+            stale = isinstance(was, dict) and (was.get("s1"), was.get("s2")) != (g["s1"], g["s2"])
+            if not a.get("replace") or stale:
+                raise ActionError("exists", "Already entered as %d-%d." % (g["s1"], g["s2"]), s1=g["s1"], s2=g["s2"])
         g.update(s1=s1, s2=s2, status="done", at=int(time.time()))
+        g.pop("auto", None)
         if sess["status"] == "closed":
             self.recompute()
 
@@ -361,6 +399,7 @@ class Store:
         sess, g = self._game(a, org)
         g.update(s1=None, s2=None, status="pending")
         g.pop("at", None)
+        g.pop("auto", None)
         if sess["status"] == "closed":
             g["status"] = "skipped"
             self.recompute()
@@ -370,6 +409,7 @@ class Store:
         if g["status"] == "done":
             raise ActionError("scores", "Clear the score first.")
         g["status"] = "skipped" if a.get("skip", True) else "pending"
+        g.pop("auto", None)
 
     def do_round_confirm(self, a, org):
         """Move a pool on to its next round once every game in the current one has a score."""
@@ -416,11 +456,8 @@ class Store:
                     if out in g[team]:
                         g[team] = [new if p == out else p for p in g[team]]
                         changed += 1
-        played = any(out in g["t1"] + g["t2"] for g in self._done(sess))
-        if played:
-            pool["players"].append(new)
-        else:
-            pool["players"][pool["players"].index(out)] = new
+        pool["players"][pool["players"].index(out)] = new
+        if not any(out in g["t1"] + g["t2"] for g in self._done(sess)):
             sess["attending"] = [p for p in sess["attending"] if p != out]
         if new not in sess["attending"]:
             sess["attending"].append(new)
@@ -433,7 +470,9 @@ class Store:
         for g in sess["games"].values():
             if g["status"] == "pending":
                 g["status"] = "skipped"
+                g["auto"] = True
         sess["status"] = "closed"
+        sess["wasClosed"] = True
         self.recompute()
         self.save()
         self.backup()
@@ -445,10 +484,12 @@ class Store:
         latest = max((s for s in self.state["sessions"] if s["status"] == "closed"), key=lambda s: (s["date"], s["id"]))
         if latest is not sess:
             raise ActionError("order", "Only the most recent session can be reopened.")
+        self.backup()
         sess["status"] = "live"
         for g in sess["games"].values():
-            if g["status"] == "skipped":
+            if g["status"] == "skipped" and g.get("auto"):
                 g["status"] = "pending"
+                g.pop("auto", None)
         self.recompute()
 
 

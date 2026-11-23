@@ -108,7 +108,8 @@ test("full session flow: pools, new player, scores, clash, close, correction", (
 
   throwsCode(() => L.apply(st, "game.score", { sid, gid, s1: 11, s2: 9, replace: true }, false), "pin");
   const after = JSON.stringify(st.ratings.current);
-  L.apply(st, "game.score", { sid, gid, s1: 4, s2: 11, replace: true }, true);
+  throwsCode(() => L.apply(st, "game.score", { sid, gid, s1: 4, s2: 11, replace: true }, true), "closed");   // a stray score screen cannot touch a finished night
+  L.apply(st, "game.score", { sid, gid, s1: 4, s2: 11, replace: true, history: true }, true);
   assert.notStrictEqual(JSON.stringify(st.ratings.current), after);
 });
 
@@ -170,6 +171,61 @@ test("sessions: no back-dating, no finishing an empty session", () => {
   assert.strictEqual(st.sessions.length, 1);
   L.apply(st, "session.create", { date: "2026-11-23" }, true);                  // same day is allowed
   assert.strictEqual(st.sessions.length, 2);
+});
+
+test("score safety: stale edits, score cap, session keeps its target", () => {
+  const st = league(8);
+  const sid = L.apply(st, "session.create", { date: "2026-11-23" }, true).id, sess = st.sessions[0];
+  L.apply(st, "session.assign", { sid }, true);
+  L.apply(st, "session.start", { sid }, true);
+  assert.strictEqual(sess.pointsToWin, 11);
+  throwsCode(() => L.apply(st, "league.update", { pointsToWin: "15.5" }, true), "invalid");
+  throwsCode(() => L.apply(st, "league.update", { pointsToWin: "" }, true), "invalid");
+  L.apply(st, "league.update", { pointsToWin: 15 }, true);
+  const gid = sess.pools[0].rounds[0][0];
+  throwsCode(() => L.apply(st, "game.score", { sid, gid, s1: 15, s2: 9 }, false), "invalid");    // this session is still first to 11
+  L.apply(st, "game.score", { sid, gid, s1: 8, s2: 6 }, false);                                  // a game stopped early
+  L.apply(st, "game.score", { sid, gid, s1: 11, s2: 7, replace: true, was: { s1: 8, s2: 6 } }, false);
+  L.apply(st, "game.score", { sid, gid, s1: 9, s2: 11, replace: true }, false);                 // another device changes it
+  const e = throwsCode(() => L.apply(st, "game.score", { sid, gid, s1: 11, s2: 2, replace: true, was: { s1: 11, s2: 7 } }, false), "exists");
+  assert.deepStrictEqual(e.extra, { s1: 9, s2: 11 });
+  assert.deepStrictEqual([sess.games[gid].s1, sess.games[gid].s2], [9, 11]);
+});
+
+test("reopen keeps hand-marked not-played games; substitute; delete needs a yes", () => {
+  const st = league(9);
+  const sid = L.apply(st, "session.create", { date: "2026-11-23" }, true).id, sess = st.sessions[0];
+  L.apply(st, "session.attend", { sid, pid: "p9", on: false }, true);
+  L.apply(st, "session.assign", { sid }, true);
+  L.apply(st, "session.start", { sid }, true);
+  const pool = sess.pools[0], [g1, g2] = pool.rounds[0], byHand = pool.rounds[1][0];
+  L.apply(st, "game.score", { sid, gid: g1, s1: 11, s2: 5 }, false);
+  L.apply(st, "game.skip", { sid, gid: byHand }, true);
+  const out = sess.games[g1].t1[0];
+  assert.strictEqual(L.apply(st, "session.substitute", { sid, out, in: "p9" }, true).games, 6);
+  assert.strictEqual(pool.players.length, 8);
+  assert.ok(pool.players.includes("p9") && !pool.players.includes(out));
+  assert.ok(sess.attending.includes(out));                      // they played, so they stay on the record
+  throwsCode(() => L.apply(st, "session.substitute", { sid, out, in: "p9" }, true), "missing");
+  L.apply(st, "session.close", { sid }, true);
+  assert.strictEqual(sess.games[g2].status, "skipped");
+  L.apply(st, "session.reopen", { sid }, true);
+  assert.strictEqual(sess.games[g2].status, "pending");          // skipped by Finish: back to play
+  assert.strictEqual(sess.games[byHand].status, "skipped");      // skipped by hand: stays
+  throwsCode(() => L.apply(st, "session.delete", { sid }, true), "scores");
+  L.apply(st, "session.delete", { sid, force: true }, true);
+  assert.strictEqual(st.sessions.length, 0);
+});
+
+test("the sampled order average is the published one (same numbers as the Python engine)", () => {
+  /* a pool of 7 plays 14 rounds, which is past the exact limit, so this goes through the seeded sampler */
+  const start = {}, rounds = [];
+  for (let i = 0; i < 7; i++) start["p" + i] = 3100 + 100 * i;
+  for (let r = 0; r < 14; r++) rounds.push([{ gid: "g" + r, win: ["p" + (r % 7), "p" + ((r + 1) % 7)], lose: ["p" + ((r + 3) % 7), "p" + ((r + 5) % 7)], ws: 11, ls: (r * 3) % 10 }]);
+  const res = L.allOrders(start, rounds), got = Object.keys(start).map(p => Math.floor(res.ends[p] * 1000 + 0.5));
+  const file = path.join(__dirname, "parity.json");
+  if (process.env.WRITE_PARITY) fs.writeFileSync(file, JSON.stringify({ ends: got }) + "\n");
+  assert.deepStrictEqual(got, JSON.parse(fs.readFileSync(file, "utf8")).ends);
 });
 
 console.log(`${passed} passed`);

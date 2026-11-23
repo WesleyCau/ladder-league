@@ -364,6 +364,11 @@ table.wk td { white-space: nowrap; }
 .note.warn b { color: inherit; }
 .dragghost { position: fixed; left: 0; top: 0; z-index: 80; pointer-events: none; background: var(--chrome); color: var(--on-chrome); border: 2px solid var(--brand); padding: 8px 14px; border-radius: 12px; font-weight: 750; box-shadow: 0 10px 28px rgba(0, 0, 0, .35); white-space: nowrap; }
 body.dragging, body.dragging * { cursor: grabbing !important; user-select: none; -webkit-user-select: none; }
+.plan { font-size: 14px; color: var(--ink-2); font-weight: 600; }
+.plan span { display: block; color: var(--warn-text); font-weight: 750; }
+.where2 { font-size: clamp(20px, 4.6vw, 28px); font-weight: 800; color: var(--brand-text); }
+a.note { display: block; text-decoration: none; font-weight: 650; }
+.sit.now { font-size: clamp(15px, 1.7vw, 20px); padding: 0 4px; }
 .oddlist { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 2px 14px; }
 .odd { display: grid; grid-template-columns: minmax(0, 1.1fr) auto minmax(0, 1.4fr); gap: 12px; align-items: baseline; padding: 10px 0; border-top: 1px solid var(--line); font-size: 18px; }
 .odd:first-child { border-top: 0; }

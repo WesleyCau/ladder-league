@@ -55,12 +55,24 @@ function toast(msg) {
   t.textContent = msg; t.classList.add("show");
   clearTimeout(toast.timer); toast.timer = setTimeout(() => t.classList.remove("show"), 2200);
 }
+const inFlight = new Set();
 async function act(area, type, args, okMsg) {
-  const j = await send(type, args);
+  const key = type + JSON.stringify(args);
+  if (inFlight.has(key)) return { ok: false, code: "busy", message: app.err[area] || "" };     // a double tap: the first one is still on its way
+  inFlight.add(key);
+  let j;
+  try { j = await send(type, args); } finally { inFlight.delete(key); }
   app.err[area] = j.ok ? "" : j.message;
   if (j.ok && okMsg) toast(okMsg);
   render();
   return j;
+}
+
+/* ---------- backups on this device ---------- */
+const BACKUPS = "ladder-backups", WHY = { "session.close": "before finishing a session", "session.reopen": "before reopening a session", "session.reset": "before resetting a session", "session.delete": "before deleting a session", correction: "before correcting a finished session", import: "before loading a league file", restore: "before restoring a backup" };
+function backups() { try { return JSON.parse(localStorage.getItem(BACKUPS) || "[]"); } catch (e) { return []; } }
+function backupLocal(why) {
+  try { localStorage.setItem(BACKUPS, JSON.stringify([{ at: Date.now(), why, state: app.st }].concat(backups()).slice(0, 5))); } catch (e) { /* storage full or blocked: carry on */ }
 }
 
 /* ---------- selectors ---------- */
@@ -100,7 +112,8 @@ function roundInfo(s, pool) {
   const off = list => { const on = new Set(list.flatMap(g => [...g.t1, ...g.t2])); return list.length ? pool.players.filter(p => !on.has(p)) : []; };
   return { total, at, finished: at >= total, games, next, sitting: off(games), sittingNext: off(next),
     ready: games.length > 0 && games.every(g => g.status !== "pending"), waiting: games.filter(g => g.status === "pending").length,
-    done: all.filter(g => g.status === "done").length, playable: all.filter(g => g.status !== "skipped").length };
+    done: all.filter(g => g.status === "done").length, playable: all.filter(g => g.status !== "skipped").length,
+    missed: all.filter(g => g.status === "pending" && g.round < at).length };
 }
 const pct = r => (r.playable ? Math.round(100 * r.done / r.playable) : 0);
 function poolTable(s, pool) {
@@ -176,7 +189,7 @@ function fit(s) {
   const vw = document.documentElement.clientWidth, n = s.pools.length;
   if (vw < 900 || !n) return "";
   const col = (Math.min(1400, vw) - 24 - 10 * (n - 1)) / n, cap = (lo, v, hi) => Math.max(lo, Math.min(hi, Math.floor(v * 10) / 10));
-  const names = s.pools.flatMap(p => p.players).map(sn), pairs = Object.values(s.games).flatMap(g => [g.t1, g.t2]).map(t => t.map(sn).join(" / "));
+  const names = [...new Set(s.pools.flatMap(p => p.players).concat(Object.values(s.games).flatMap(g => g.t1.concat(g.t2))))].map(sn), pairs = Object.values(s.games).flatMap(g => [g.t1, g.t2]).map(t => t.map(sn).join(" / "));
   const name = Math.max(...names.map(x => emWidth(x, 800))), pair = Math.max(...pairs.map(x => emWidth(x, 700)));
   const pts = Math.min(76, Math.max(54, vw * 0.055));      // the score column, the same clamp as --ptsw in the stylesheet
   const colB = (Math.min(1400, vw) - 12 - 6 * (n - 1)) / n;      // the board runs closer to the screen edge, with tighter gaps
@@ -235,13 +248,13 @@ function standingsTable(s, pool) {
   </table></div>`;
 }
 function resultRows(s, pool, canEdit, upto) {
-  const rows = poolGames(s, pool).filter(g => (g.status !== "pending" || canEdit === "all") && (upto == null || g.round < upto));
+  const rows = poolGames(s, pool).filter(g => (g.status !== "pending" || canEdit === "all" || (canEdit && upto != null)) && (upto == null || g.round < upto));
   if (!rows.length) return '<p class="muted">No results yet.</p>';
   return `<div class="results">${rows.map(g => {
     const w1 = g.status === "done" && g.s1 > g.s2, w2 = g.status === "done" && g.s2 > g.s1;
-    const mark = g.status === "done" ? null : g.status === "skipped" ? "not played" : "to play";
+    const mark = g.status === "done" ? null : g.status === "skipped" ? "not played" : upto != null ? "no score yet" : "to play";
     const line = (ids, pts, won) => `<span class="ln ${won ? "w" : ""}"><span>${teamLine(ids)}</span><span class="sc">${mark ? "" : pts}</span></span>`;
-    const btn = canEdit ? `<button class="btn small" data-act="flow" data-sid="${s.id}" data-gid="${g.id}">${g.status === "done" ? "Change" : "Enter"}</button>` : "";
+    const btn = canEdit ? `<button class="btn small${g.status === "pending" && upto != null ? " primary" : ""}" data-act="flow" data-sid="${s.id}" data-gid="${g.id}">${g.status === "done" ? "Change" : "Enter"}</button>` : "";
     return `<div class="res"><span class="rd">R${g.round + 1}</span>
       <span class="who lines">${line(g.t1, g.s1, w1)}${line(g.t2, g.s2, w2)}${mark ? `<span class="muted">${mark}</span>` : ""}</span>${btn}</div>`;
   }).join("")}</div>`;
@@ -278,6 +291,7 @@ function viewCourt(pid) {
       <section class="stack">${roundCards(s, pool, r)}
         ${r.sitting.length ? `<p class="sit"><b>Sitting out</b> ${namesList(r.sitting)}</p>` : ""}
         ${errLine("court")}${confirmBlock(s, pool, r)}${backBlock(s, pool, r)}</section>`}
+    ${r.missed ? `<p class="note warn">⚠ ${r.missed === 1 ? "1 earlier game has" : r.missed + " earlier games have"} no score. Enter ${r.missed === 1 ? "it" : "them"} under Earlier rounds below.</p>` : ""}
     ${nextBox(pool, r)}
     ${r.at > 0 ? `<div class="card"><h2>Earlier rounds</h2>${resultRows(s, pool, true, r.at)}</div>` : ""}
     <div class="card"><h2>${esc(pool.name)} standings</h2>${standingsTable(s, pool)}</div></div>`;
@@ -292,7 +306,8 @@ function viewBoard() {
       const r = roundInfo(s, p);
       return `<div class="stack">
         <div class="row spread bhead"><h2><a href="#/court/${p.id}">${esc(p.name)}</a></h2><span class="round">${r.finished ? "Finished" : `Round ${r.at + 1} of ${r.total}`}</span></div>
-        ${r.finished ? '<div class="note">All rounds finished.</div>' : roundCards(s, p, r, true) + confirmBlock(s, p, r, true)}
+        ${r.finished ? '<div class="note">All rounds finished.</div>' : roundCards(s, p, r, true) + (r.sitting.length ? `<p class="sit now"><b>Sitting out now</b> ${namesList(r.sitting)}</p>` : "") + confirmBlock(s, p, r, true)}
+        ${r.missed ? `<a class="note warn" href="#/court/${p.id}">⚠ ${r.missed === 1 ? "1 earlier game has" : r.missed + " earlier games have"} no score. Tap to enter.</a>` : ""}
         ${nextBox(p, r, true)}${backBlock(s, p, r)}
       </div>`;
     }).join("")}</div>`;
@@ -573,10 +588,12 @@ function orgSession() {
     if (last) { const d = new Date(last.date + "T00:00"); d.setDate(d.getDate() + 7); const next = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; if (next > def) def = next; }
     def = app.form.newdate || def;
     const clash = closedSess().some(x => x.date === def);
+    const far = (new Date(def + "T00:00") - new Date(todayIso() + "T00:00")) / 864e5 > 60;
     return `<form class="card" data-form="create"><h2>New session</h2>
       <p class="muted">Starts with the players who came last time. You can change who is playing next.</p>
       <div class="row"><label class="field">Date<input id="newdate" type="date" value="${esc(def)}" ${last ? `min="${last.date}"` : ""}></label></div>
       ${clash ? `<p class="note warn">⚠ There is already a finished session on ${dayMonth(def)}. A second one will be listed as ${dayMonth(def)} (2).</p>` : ""}
+      ${far ? `<p class="note warn">⚠ ${dayMonth(def)} ${def.slice(0, 4)} is more than two months away. Check the month and year.</p>` : ""}
       ${errLine("session")}<button class="btn primary" type="submit">Create session</button></form>`;
   }
   return s.status === "setup" ? orgSetup(s) : orgLive(s);
@@ -597,6 +614,15 @@ function outOfOrder(s) {
   return seq.filter(x => !keep.has(x.id)).map(x => ({ id: x.id, pool: s.pools[x.k], high: seq.some(y => y.k > x.k && y.r > x.r) }));
 }
 
+/* What a pool of n players will play: rounds, games a round, games each. */
+function poolPlan(n, courts) {
+  if (n < Ladder.MIN_POOL || n > Ladder.MAX_POOL) return null;
+  const per = Math.floor(n / 4), rounds = Ladder.roundCount(n), each = Math.round(rounds * per * 4 / n);
+  const warn = per < 2 ? `One game at a time, so ${rounds} rounds: about twice as long as a pool of eight.`
+    : per > (courts || 1) && per > 2 ? "Three games a round: give this pool 3 courts, or it will run long." : "";
+  return { per, rounds, each, warn, text: `${rounds} rounds of ${per} game${per > 1 ? "s" : ""}, ${each} games each` };
+}
+
 function orgSetup(s) {
   const q = (app.form.q || "").toLowerCase();
   const active = Object.values(app.st.players).filter(p => p.active).sort((a, b) => a.name.localeCompare(b.name));
@@ -604,7 +630,9 @@ function orgSetup(s) {
   const loose = s.attending.filter(p => !placed.has(p));
   const sel = app.sel && inSet.has(app.sel) ? app.sel : null;
   const games = n => (n >= 4 && n <= 12 ? null : "needs 4 to 12 players");
+  const sizes = s.pools.map(p => p.players.length), att = s.attending.length, minP = Math.max(1, Math.ceil(att / Ladder.MAX_POOL)), maxP = Math.max(1, Math.floor(att / Ladder.MIN_POOL));
   const odd = Object.fromEntries(outOfOrder(s).map(o => [o.id, o])), oddN = Object.keys(odd).length;
+  const hand = s.pools.length > 0 && (oddN > 0 || Math.max(...sizes) - Math.min(...sizes) > 1);      // pools no longer look like a fresh assignment
   const pl = (id, i) => `<li><button class="pl${odd[id] ? " out" : ""}" data-drag data-act="pick" data-pid="${id}" aria-pressed="${sel === id}"><span class="rk">${i === null ? "" : i + 1}</span><span class="nm">${esc(nm(id))}${odd[id] ? `<small>⚠ ${odd[id].high ? "higher" : "lower"} than their rating</small>` : ""}</span><span class="rt">${fmt(rating(id))}</span></button></li>`;
   return `
   <div class="row spread"><h2>${niceDate(s.date)}</h2>
@@ -621,17 +649,20 @@ function orgSetup(s) {
     </form>${errLine("attend")}</div>
 
   <div class="card"><div class="row spread"><h2>2. Pools</h2>
-      <span class="row">${s.pools.length ? `<button class="btn small" data-act="assign" data-sid="${s.id}" data-pools="${Math.max(1, s.pools.length - 1)}" aria-label="One pool fewer">−</button><span class="num">${s.pools.length} pools</span><button class="btn small" data-act="assign" data-sid="${s.id}" data-pools="${s.pools.length + 1}" aria-label="One pool more">+</button>` : ""}
-      <button class="btn ${s.pools.length ? "small" : "primary"}" data-act="assign" data-sid="${s.id}">${s.pools.length ? "Re-assign by rating" : "Assign pools by rating"}</button></span></div>
+      <span class="row">${s.pools.length ? `<button class="btn small" data-act="${hand ? "ask" : "assign"}" data-key="assign:${s.pools.length - 1}" data-sid="${s.id}" data-pools="${s.pools.length - 1}" aria-label="One pool fewer" ${s.pools.length - 1 < minP ? `disabled title="A pool can have at most ${Ladder.MAX_POOL} players"` : ""}>−</button><span class="num">${s.pools.length} pools</span><button class="btn small" data-act="${hand ? "ask" : "assign"}" data-key="assign:${s.pools.length + 1}" data-sid="${s.id}" data-pools="${s.pools.length + 1}" aria-label="One pool more" ${s.pools.length + 1 > maxP ? `disabled title="A pool needs at least ${Ladder.MIN_POOL} players"` : ""}>+</button>` : ""}
+      <button class="btn ${s.pools.length ? "small" : "primary"}" data-act="${hand ? "ask" : "assign"}" data-key="assign:" data-sid="${s.id}">${s.pools.length ? "Re-assign by rating" : "Assign pools by rating"}</button></span></div>
+    ${(app.confirm || "").startsWith("assign:") ? `<div class="note warn"><b>Re-assigning puts everyone back in rating order</b> and drops the changes made by hand.
+      <div class="row" style="margin-top:8px"><button class="btn small primary" data-act="assign" data-sid="${s.id}" data-pools="${esc(app.confirm.slice(7))}">Yes, re-assign</button><button class="btn small" data-act="cancel">Keep my changes</button></div></div>` : ""}
     <p class="muted">${s.pools.length ? "Drag a player to another pool (on a touch screen, press and hold first), or tap them and choose where to move them." : "Players are ranked by rating and split into pools of about eight. You can move anyone afterwards."}</p>
     ${oddN ? `<p class="note warn">⚠ <b>${oddN === 1 ? "1 player is" : oddN + " players are"} out of rating order</b>, shown in yellow. You can still start: you will be asked to confirm.</p>` : ""}
     ${loose.length ? `<div class="pool warn" data-drop="none"><h3>Not in a pool yet (${loose.length})</h3><ol>${loose.map(id => pl(id, null)).join("")}</ol></div>` : ""}
     <div class="pools">${s.pools.map(p => {
-      const n = p.players.length, bad = games(n);
+      const n = p.players.length, bad = games(n), plan = poolPlan(n, p.courts);
       return `<div class="pool ${bad ? "warn" : ""}" data-drop="${p.id}">
         <div class="row spread"><h3>${esc(p.name)} <span class="muted num">(${n})</span></h3>
-          <span class="seg" role="group" aria-label="${esc(p.name)} courts">${[1, 2].map(k => `<button data-act="courts" data-sid="${s.id}" data-pool="${p.id}" data-courts="${k}" aria-pressed="${p.courts === k}">${k} court${k > 1 ? "s" : ""}</button>`).join("")}</span></div>
+          <span class="seg" role="group" aria-label="${esc(p.name)} courts">${(n >= 12 || p.courts === 3 ? [1, 2, 3] : [1, 2]).map(k => `<button data-act="courts" data-sid="${s.id}" data-pool="${p.id}" data-courts="${k}" aria-pressed="${p.courts === k}">${k} court${k > 1 ? "s" : ""}</button>`).join("")}</span></div>
         ${bad ? `<p class="err">${bad}</p>` : ""}
+        ${plan ? `<p class="plan">${plan.text}${plan.warn ? `<span>⚠ ${plan.warn}</span>` : ""}</p>` : ""}
         <ol>${p.players.map((id, i) => pl(id, i)).join("")}</ol></div>`;
     }).join("")}</div>
     ${errLine("pools")}</div>
@@ -643,7 +674,8 @@ function orgSetup(s) {
   <div class="card"><h2>3. Start</h2>
     <p class="muted">Starting creates each pool's schedule. A pool of eight plays 7 rounds: everyone partners everyone once.</p>
     ${errLine("start")}
-    <button class="btn huge primary" data-act="start" data-sid="${s.id}" ${s.pools.length ? "" : "disabled"}>Start session</button></div>`;
+    <button class="btn huge primary" data-act="start" data-sid="${s.id}" ${s.pools.length ? "" : "disabled"}>Start session</button>
+    <p class="muted">You will see a summary to confirm first.</p></div>`;
 }
 
 function orgLive(s) {
@@ -661,11 +693,12 @@ function orgLive(s) {
     <p class="muted">Finishing locks the scores and updates every rating. ${!done ? "<b>No scores have been entered yet</b>, so there is nothing to finish. Go back to setup or delete the session instead." : pend ? `<b>${pend} games have no score</b> and will be recorded as not played.` : "All games have a score."}</p>
     ${errLine("live")}
     ${!done ? "" : app.confirm === "close" ? `<div class="row"><button class="btn primary" data-act="close" data-sid="${s.id}">Yes, finish and update ratings</button><button class="btn" data-act="cancel">Not yet</button></div>` : `<button class="btn primary" data-act="ask" data-key="close">Finish session</button>`}
-    ${done ? "" : `<div class="row"><button class="btn" data-act="unstart" data-sid="${s.id}">Back to setup</button>${app.confirm === "delete" ? `<button class="btn danger" data-act="delete" data-sid="${s.id}">Yes, delete it</button><button class="btn" data-act="cancel">Keep</button>` : `<button class="btn" data-act="ask" data-key="delete">Delete session</button>`}</div>`}</div>
+    ${done ? "" : `<button class="btn" data-act="unstart" data-sid="${s.id}">Back to setup</button>`}</div>
 
-  <div class="card"><h2>Reset the session</h2>
-    <p class="muted">For trying the app out. Clears every score and puts each pool back to round 1. Players, pools and the draw stay as they are.</p>
-    <button class="btn danger" data-act="askReset" data-sid="${s.id}">Reset session</button></div>
+  <div class="card"><h2>${s.wasClosed ? "Delete the session" : "Reset or delete the session"}</h2>
+    <p class="muted">${s.wasClosed ? "This session was finished once and then reopened, so Reset is switched off. Deleting removes it and its scores for good."
+      : "For trying the app out. Reset clears every score and puts each pool back to round 1, keeping the players, pools and draw. Delete removes the session altogether."} Both ask you to confirm, and a backup is kept on this device first.</p>
+    <div class="row">${s.wasClosed ? "" : `<button class="btn danger" data-act="askReset" data-sid="${s.id}">Reset session</button>`}<button class="btn danger" data-act="askDelete" data-sid="${s.id}">Delete session</button></div></div>
 
   <form class="card" data-form="sub" data-sid="${s.id}"><h2>Substitute a player</h2>
     <p class="muted">The replacement takes over every game the first player has not played yet.</p>
@@ -727,93 +760,138 @@ function orgSettings() {
         : `<p>Single-device mode. Everything is saved in this browser only, so other phones cannot see it. Add the Firebase details to config.js to share it live.</p>`}
       <p class="muted">Starting seeds are ${lg.seeds.map(v => (v / 1000).toFixed(1)).join(", ")}.</p></div>
     <div class="card"><h2>League data</h2>
-      <p class="muted">Save a copy of everything, or load a league file. Loading replaces all players, sessions and scores.</p>
+      <p class="muted">${app.be.replaceAll ? "Save a copy of everything, or load a league file. Loading replaces all players, sessions and scores." : "Save a copy of everything to this device."}</p>
       <div class="row"><button class="btn" data-act="export">Save a copy</button>
         ${app.be.replaceAll ? `<label class="btn">Load a league file<input id="importfile" type="file" accept="application/json,.json" style="position:absolute;opacity:0;width:1px;height:1px"></label>` : ""}</div>
       ${app.importDoc ? `<div class="note"><b>${esc(app.importDoc.name)}</b>: ${app.importDoc.players} players, ${app.importDoc.sessions} sessions. This replaces everything in the league now.
         <div class="row" style="margin-top:10px"><button class="btn primary" data-act="import">Replace the league with this file</button><button class="btn" data-act="cancel">Cancel</button></div></div>` : ""}
-      ${errLine("data")}</div>`;
+      ${errLine("data")}</div>
+    <div class="card"><h2>Backups on this device</h2>
+      <p class="muted">A copy is kept here before a session is finished, reopened, reset or deleted, and before a league file is loaded. The last five are kept, on this device only.${app.be.kind === "server" ? " The laptop also saves files in its data/backups folder." : ""}</p>
+      ${backups().length ? `<div class="results">${backups().map((x, i) => `<div class="res" style="grid-template-columns:1fr auto"><span class="who"><b>${new Date(x.at).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</b> <span class="muted">${WHY[x.why] || ""} · ${Object.keys(x.state.sessions || {}).length} sessions</span></span>
+        ${!app.be.replaceAll ? "" : app.confirm === "restore:" + i ? `<span class="row"><button class="btn small danger" data-act="restore" data-i="${i}">Yes, replace the league with this</button><button class="btn small" data-act="cancel">Cancel</button></span>` : `<button class="btn small" data-act="ask" data-key="restore:${i}">Restore</button>`}</div>`).join("")}</div>` : '<p class="muted">No backups on this device yet.</p>'}
+      ${errLine("restore")}</div>`;
 }
 
 /* ---------- score entry ---------- */
 function openFlow(sid, gid) {
   const s = sessById(sid), g = s && s.games[gid];
   if (!g) return;
-  app.flow = { sid, gid, step: "win", win: null, ws: app.st.league.pointsToWin, ls: null, err: "", clash: null, busy: false, wasDone: g.status === "done" };
+  app.flow = { sid, gid, step: "win", win: null, pts: s.pointsToWin || app.st.league.pointsToWin, ws: 0, ls: null, err: "", clash: null, busy: false, sure: false,
+    was: g.status === "done" ? { s1: g.s1, s2: g.s2 } : null,      // the score this screen set out to change, so a change made on another device is caught
+    hist: s.status === "closed" };                                   // opened on a finished session, from Organiser, History
   render();
 }
 function viewFlow() {
   const f = app.flow, s = sessById(f.sid), g = s && s.games[f.gid];
-  if (!g) { app.flow = null; return ""; }
-  const pool = s.pools.find(p => p.id === g.pool), pts = app.st.league.pointsToWin;
+  if (!g || (s.status !== "live" && !f.hist)) {                      // the session was finished or removed while this screen was open
+    app.flow = null;
+    if (g) setTimeout(() => toast("That session has been finished. The score was not changed."), 0);
+    return "";
+  }
+  const pool = s.pools.find(p => p.id === g.pool), pts = f.pts;
   const winners = f.win === 1 ? g.t1 : g.t2, losers = f.win === 1 ? g.t2 : g.t1;
+  const court = pool && pool.courts > 1 && pool.rounds[g.round] ? pool.rounds[g.round].indexOf(g.id) + 1 : 0;
+  const where = `${esc(pool ? pool.name : "")} · round ${g.round + 1}${court ? " · court " + court : ""}`;
   let body = "";
   if (f.step === "win") {
     body = `<h2>Who won?</h2>
       ${g.status === "done" ? `<p class="note">Currently entered as <b>${teamLine(g.t1)} ${g.s1} – ${g.s2} ${teamLine(g.t2)}</b>.</p>` : ""}
       <div class="picks"><button class="pick" data-act="fwin" data-win="1">${team(g.t1)}</button>
       <button class="pick" data-act="fwin" data-win="2">${team(g.t2)}</button></div>
-      ${g.status === "done" ? `<button class="btn danger" data-act="fclear">Clear this score</button>` : ""}`;
+      ${g.status !== "done" ? "" : f.sure ? `<div class="row"><button class="btn danger solid" data-act="fclear">Yes, clear ${g.s1} – ${g.s2}</button><button class="btn" data-act="fkeep">Keep the score</button></div>`
+        : `<button class="btn danger" data-act="fclear">Clear this score</button>`}`;
   } else if (f.step === "score") {
     body = `<h2>Tap the <span class="hl">losing</span> score</h2>
       <div class="match is-done slim"><div class="side won"><div class="names"><em>Won</em>${team(winners)}</div><div class="pts">${pts}</div></div>
         <div class="side lost"><div class="names"><em>Lost</em>${team(losers)}</div><div class="pts ask">?</div></div></div>
       <p class="lead">First to ${pts}, win by 1. What did <b>${teamLine(losers)}</b> finish on?</p>
       <div class="keys">${Array.from({ length: pts }, (_, i) => `<button class="key" data-act="fscore" data-ls="${i}">${i}</button>`).join("")}
-        <button class="key other" data-act="fother">Other score</button></div>`;
+        <button class="key other" data-act="fother">Stopped early</button></div>`;
   } else if (f.step === "other") {
     const stepper = (label, key, v) => `<div class="step"><b>${label}</b><button class="key" data-act="fstep" data-key="${key}" data-d="-1" aria-label="Less">−</button><span class="val">${v}</span><button class="key" data-act="fstep" data-key="${key}" data-d="1" aria-label="More">+</button></div>`;
-    body = `<h2>Set the score</h2>${stepper(teamLine(winners) + " (won)", "ws", f.ws)}${stepper(teamLine(losers), "ls", f.ls)}
+    body = `<h2>Game stopped early</h2><p class="lead">For a game that ended before anyone reached ${pts}. Set what each pair finished on.</p>
+      ${stepper(teamLine(winners) + " (ahead)", "ws", f.ws)}${stepper(teamLine(losers), "ls", f.ls)}
       <button class="btn huge primary" data-act="fconfirm" ${f.ws > f.ls ? "" : "disabled"}>Continue</button>`;
   } else {
-    body = `<h2>Save this score?</h2>
+    body = `<h2>Save this score?</h2><p class="where2">${where}</p>
       <div class="match is-done"><div class="side won"><div class="names"><em>Won</em>${team(winners)}</div><div class="pts">${f.ws}</div></div>
         <div class="side lost"><div class="names"><em>Lost</em>${team(losers)}</div><div class="pts">${f.ls}</div></div></div>
-      ${f.clash ? `<p class="err" role="alert">This game was already entered as ${teamLine(g.t1)} ${f.clash.s1} – ${f.clash.s2} ${teamLine(g.t2)}. Replace it?</p>
+      ${f.clash ? `<p class="err" role="alert">${f.was && !f.fresh ? "This score was changed on another device while this screen was open. It is now" : "This game was already entered as"} ${teamLine(g.t1)} ${f.clash.s1} – ${f.clash.s2} ${teamLine(g.t2)}. Replace it?</p>
         <button class="btn huge primary" data-act="fsave" data-replace="1" ${f.busy ? "disabled" : ""}>Replace the score</button><button class="btn" data-act="fclose">Keep ${f.clash.s1} – ${f.clash.s2}</button>`
         : `<button class="btn huge primary" data-act="fsave" ${f.busy ? "disabled" : ""}>${f.busy ? "Saving…" : "Save score"}</button>`}`;
   }
   const back = f.step === "win" ? "" : `<button class="btn" data-act="fback">‹ Back</button>`;
   return `<div class="flow" role="dialog" aria-modal="true" aria-label="Enter score">
-    <div class="flow-top">${back || "<span></span>"}<span class="where">${esc(pool ? pool.name : "")} · round ${g.round + 1}</span><button class="xbtn" data-act="fclose" aria-label="Close">✕</button></div>
+    <div class="flow-top">${back || "<span></span>"}<span class="where">${where}</span><button class="xbtn" data-act="fclose" aria-label="Close">✕</button></div>
     <div class="flow-body">${body}${f.err ? `<p class="err" role="alert">${esc(f.err)}</p>` : ""}</div></div>`;
 }
 
 /* ---------- confirmation screens ---------- */
 function viewDialog() {
   const d = app.dialog, s = sessById(d.sid);
+  const frame = (label, body) => `<div class="flow" role="dialog" aria-modal="true" aria-label="${label}">
+    <div class="flow-top"><span></span><span class="where">${s ? niceDate(s.date) : ""}</span><button class="xbtn" data-act="cancel" aria-label="Close">✕</button></div>
+    <div class="flow-body">${body}</div></div>`;
+  const err = d.err ? `<p class="err" role="alert">${esc(d.err)}</p>` : "";
+  if (!s) { app.dialog = null; return ""; }
+  const done = Object.values(s.games).filter(g => g.status === "done").length, scores = done === 1 ? "1 score" : done + " scores";
   if (d.kind === "start") {
-    const odd = s && s.status === "setup" ? outOfOrder(s) : [];
-    if (!odd.length) { app.dialog = null; return ""; }
-    return `<div class="flow" role="dialog" aria-modal="true" aria-label="Start session">
-      <div class="flow-top"><span></span><span class="where">${niceDate(s.date)}</span><button class="xbtn" data-act="cancel" aria-label="Close">✕</button></div>
-      <div class="flow-body"><h2>Start with ${odd.length === 1 ? "1 player" : odd.length + " players"} out of rating order?</h2>
-        <p class="lead">The pools were changed by hand, so ${odd.length === 1 ? "this player no longer lines" : "these players no longer line"} up with the ratings.</p>
-        <div class="oddlist">${odd.map(o => `<div class="odd"><b>${esc(nm(o.id))}</b><span class="num">${fmt(rating(o.id))}</span><span>${esc(o.pool.name)}, ${o.high ? "higher" : "lower"} than their rating</span></div>`).join("")}</div>
-        <button class="btn huge primary" data-act="start" data-sid="${s.id}" data-force="1">Yes, start the session</button>
-        <button class="btn huge" data-act="cancel">Go back to the pools</button></div></div>`;
+    if (s.status !== "setup") { app.dialog = null; return ""; }
+    const odd = outOfOrder(s), plans = s.pools.map(p => ({ p, plan: poolPlan(p.players.length, p.courts) })), slow = plans.filter(x => x.plan && x.plan.warn);
+    return frame("Start session", `<h2>Start the session?</h2>
+      <div class="oddlist">${plans.map(({ p, plan }) => `<div class="odd"><b>${esc(p.name)}</b><span class="num">${p.players.length} players</span><span>${plan ? `${plan.text}, ${p.courts} court${p.courts > 1 ? "s" : ""}` : "needs 4 to 12 players"}</span></div>`).join("")}</div>
+      ${slow.length ? `<p class="note warn">⚠ ${slow.map(x => `<b>${esc(x.p.name)}</b>: ${x.plan.warn}`).join("<br>")}</p>` : ""}
+      ${odd.length ? `<p class="lead"><b>${odd.length === 1 ? "1 player is" : odd.length + " players are"} out of rating order</b> because the pools were changed by hand:</p>
+        <div class="oddlist">${odd.map(o => `<div class="odd"><b>${esc(nm(o.id))}</b><span class="num">${fmt(rating(o.id))}</span><span>${esc(o.pool.name)}, ${o.high ? "higher" : "lower"} than their rating</span></div>`).join("")}</div>` : ""}
+      ${err}<button class="btn huge primary" data-act="start" data-sid="${s.id}" data-force="1" ${d.busy ? "disabled" : ""}>${d.busy ? "Starting…" : "Yes, start the session"}</button>
+      <button class="btn huge" data-act="cancel">Go back to the pools</button>`);
   }
-  if (!s || s.status !== "live") { app.dialog = null; return ""; }
-  const done = Object.values(s.games).filter(g => g.status === "done").length, moved = s.pools.filter(p => p.confirmed > 0).length;
-  return `<div class="flow" role="dialog" aria-modal="true" aria-label="Reset session">
-    <div class="flow-top"><span></span><span class="where">${niceDate(s.date)}</span><button class="xbtn" data-act="cancel" aria-label="Close">✕</button></div>
-    <div class="flow-body"><h2>Reset this session?</h2>
-      <p class="lead">This clears <b>${done === 1 ? "1 score" : done + " scores"}</b> and puts ${moved ? `<b>${moved === 1 ? "1 pool" : moved + " pools"}</b>` : "every pool"} back to <b>round 1</b>. It cannot be undone.</p>
-      <p class="lead">Players, pools and the draw stay as they are. Ratings and finished sessions are not touched.</p>
-      ${d.err ? `<p class="err" role="alert">${esc(d.err)}</p>` : ""}
-      <button class="btn huge danger solid" data-act="reset" data-sid="${s.id}" ${d.busy ? "disabled" : ""}>${d.busy ? "Resetting…" : "Yes, reset the session"}</button>
-      <button class="btn huge" data-act="cancel">No, keep the scores</button></div></div>`;
+  if (s.status !== "live") { app.dialog = null; return ""; }
+  if (d.kind === "delete") {
+    return frame("Delete session", `<h2>Delete this session?</h2>
+      <p class="lead">This removes the session${done ? ` and its <b>${scores}</b>` : ""} for good.${s.wasClosed ? " It was finished once and then reopened, so its results will also leave the ratings." : ""}</p>
+      <p class="lead">Players and earlier sessions are not touched. A backup is kept on this device first (Organiser, Settings).</p>
+      ${err}<button class="btn huge danger solid" data-act="delete" data-sid="${s.id}" data-force="1" ${d.busy ? "disabled" : ""}>${d.busy ? "Deleting…" : "Yes, delete the session"}</button>
+      <button class="btn huge" data-act="cancel">No, keep it</button>`);
+  }
+  const moved = s.pools.filter(p => p.confirmed > 0).length;
+  return frame("Reset session", `<h2>Reset this session?</h2>
+    <p class="lead">This clears <b>${scores}</b> and every not-played mark, and puts ${moved ? `<b>${moved === 1 ? "1 pool" : moved + " pools"}</b>` : "every pool"} back to <b>round 1</b>.</p>
+    <p class="lead">Players, pools and the draw stay as they are. Ratings and finished sessions are not touched. A backup is kept on this device first (Organiser, Settings).</p>
+    ${err}<button class="btn huge danger solid" data-act="reset" data-sid="${s.id}" ${d.busy ? "disabled" : ""}>${d.busy ? "Resetting…" : "Yes, reset the session"}</button>
+    <button class="btn huge" data-act="cancel">No, keep the scores</button>`);
+}
+/* Run the action a confirmation screen was asking about. */
+async function dialogRun(type, args, okMsg, backup) {
+  const g = app.dialog;
+  if (!g || g.busy) return { ok: false };
+  g.busy = true; g.err = ""; render();
+  if (backup) backupLocal(type);
+  const j = await send(type, args);
+  if (j.ok) { app.dialog = null; toast(okMsg); } else { g.busy = false; g.err = j.message; }
+  render();
+  return j;
 }
 
+/* ---------- render ---------- */
+let overlayUp = false;      // the score screen and the confirmation screens take one step of browser history, so Back closes them
+let overlayLeaving = false; // that step is being taken back; anything that changes page next waits for it
+const afterOverlay = [];
+function whenSettled(fn) { if (overlayLeaving) afterOverlay.push(fn); else fn(); }
 /* ---------- render ---------- */
 function render() {
   if (!app.st) return;
   const [, route, a, b] = location.hash.split("/");
-  const view = route === "court" ? viewCourt(a) : route === "board" ? viewBoard() : route === "standings" ? viewStandings() : route === "org" ? viewOrg(a, b) : viewHome();
+  const view = route === "court" ? viewCourt((a || "").toUpperCase()) : route === "board" ? viewBoard() : route === "standings" ? viewStandings() : route === "org" ? viewOrg(a, b) : viewHome();
   const focused = document.activeElement && document.activeElement.id, selStart = focused && document.activeElement.selectionStart;
   $("#app").innerHTML = shell(view);
   $("#overlay").innerHTML = app.flow ? viewFlow() : app.dialog ? viewDialog() : "";
-  document.body.style.overflow = app.flow || app.dialog ? "hidden" : "";
+  const up = !!(app.flow || app.dialog);
+  document.body.style.overflow = up ? "hidden" : "";
+  if (up && !overlayUp && !(history.state && history.state.overlay)) history.pushState({ overlay: true }, "");
+  if (!up && overlayUp && history.state && history.state.overlay) { overlayLeaving = true; history.back(); }
+  overlayUp = up;
   document.title = app.st.league.name;
   if (focused && !app.flow) {
     const el = document.getElementById(focused);
@@ -825,26 +903,34 @@ function render() {
 const A = {
   flow: d => openFlow(d.sid, d.gid),
   fclose: () => { app.flow = null; render(); },
-  fwin: d => { const f = app.flow; f.win = +d.win; f.ws = app.st.league.pointsToWin; f.ls = null; f.step = "score"; render(); },
-  fscore: d => { const f = app.flow; f.ls = +d.ls; f.ws = app.st.league.pointsToWin; f.step = "confirm"; render(); },
-  fother: () => { const f = app.flow, pts = app.st.league.pointsToWin; f.ws = pts + 1; f.ls = pts - 1; f.step = "other"; render(); },
-  fstep: d => { const f = app.flow; f[d.key] = Math.max(0, Math.min(60, f[d.key] + (+d.d))); render(); },
+  fwin: d => { const f = app.flow; f.win = +d.win; f.ws = f.pts; f.ls = null; f.sure = false; f.step = "score"; render(); },
+  fscore: d => { const f = app.flow; f.ls = +d.ls; f.ws = f.pts; f.step = "confirm"; render(); },
+  fother: () => { const f = app.flow; f.ws = f.pts - 1; f.ls = Math.max(0, f.pts - 2); f.step = "other"; render(); },
+  fstep: d => { const f = app.flow, top = d.key === "ws" ? f.pts : f.pts - 1; f[d.key] = Math.max(d.key === "ws" ? 1 : 0, Math.min(top, f[d.key] + (+d.d))); render(); },
   fconfirm: () => { app.flow.step = "confirm"; render(); },
-  fback: () => { const f = app.flow; f.err = ""; f.clash = null; f.step = f.step === "confirm" ? (f.ws === app.st.league.pointsToWin && f.ls < f.ws ? "score" : "other") : "win"; render(); },
+  fback: () => { const f = app.flow; f.err = ""; f.clash = null; f.step = f.step === "confirm" ? (f.ws === f.pts ? "score" : "other") : "win"; render(); },
+  fkeep: () => { app.flow.sure = false; render(); },
   fsave: async d => {
     const f = app.flow; if (f.busy) return;
     f.busy = true; f.err = ""; render();
-    const s1 = f.win === 1 ? f.ws : f.ls, s2 = f.win === 1 ? f.ls : f.ws;
-    const j = await send("game.score", { sid: f.sid, gid: f.gid, s1, s2, replace: !!d.replace || f.wasDone });
-    if (!app.flow) return;
+    const s1 = f.win === 1 ? f.ws : f.ls, s2 = f.win === 1 ? f.ls : f.ws, args = { sid: f.sid, gid: f.gid, s1, s2, replace: !!d.replace || !!f.was };
+    if (f.was) args.was = f.was;
+    if (f.hist) args.history = true;
+    if (f.hist) backupLocal("correction");
+    const j = await send("game.score", args);
+    if (app.flow !== f) return;
     f.busy = false;
     if (j.ok) { app.flow = null; toast("Score saved"); }
-    else if (j.code === "exists") f.clash = { s1: j.s1, s2: j.s2 };
+    else if (j.code === "exists") { f.fresh = !f.was; f.clash = { s1: j.s1, s2: j.s2 }; f.was = { s1: j.s1, s2: j.s2 }; }      // replacing now means replacing what is really there
     else f.err = j.message;
     render();
   },
   fclear: async () => {
-    const f = app.flow, j = await send("game.clear", { sid: f.sid, gid: f.gid });
+    const f = app.flow;
+    if (!f.sure) { f.sure = true; return render(); }
+    const args = { sid: f.sid, gid: f.gid };
+    if (f.hist) args.history = true;
+    const j = await send("game.clear", args);
     if (j.ok) { app.flow = null; toast("Score cleared"); } else f.err = j.message;
     render();
   },
@@ -864,11 +950,15 @@ const A = {
   },
   hall: d => { const hs = app.hs; if (!hs) return; hs.start = []; hs.now = []; hs.custom = !d.on; hs.prev = d.on ? hs.on : null; hs.on = d.on ? null : []; render(); },
   askReset: d => { app.dialog = { sid: d.sid, busy: false, err: "" }; render(); },
-  reset: async d => {
-    const g = app.dialog; if (!g || g.busy) return;
-    g.busy = true; g.err = ""; render();
-    const j = await send("session.reset", { sid: d.sid });
-    if (j.ok) { app.dialog = null; toast("Session reset"); } else { g.busy = false; g.err = j.message; }
+  askDelete: d => { app.dialog = { kind: "delete", sid: d.sid, busy: false, err: "" }; render(); },
+  reset: d => dialogRun("session.reset", { sid: d.sid }, "Session reset", true),
+  restore: async d => {
+    const pick = backups()[+d.i]; app.confirm = null;
+    if (!pick || !app.be.replaceAll) return render();
+    backupLocal("restore");
+    const j = await app.be.replaceAll(pick.state);
+    app.err.restore = j.ok ? "" : j.message;
+    if (j.ok) toast("Backup restored");
     render();
   },
   lock: async () => { await app.be.signOut(); app.form.password = ""; render(); },
@@ -881,6 +971,7 @@ const A = {
   },
   import: async () => {
     const doc = app.importDoc; app.importDoc = null;
+    backupLocal("import");
     const j = await app.be.replaceAll(doc.data);
     app.err.data = j.ok ? "" : j.message;
     if (j.ok) toast("League loaded");
@@ -888,23 +979,21 @@ const A = {
   },
   ask: d => { app.confirm = d.key; render(); },
   cancel: () => { app.confirm = null; app.sel = null; app.edit = null; app.importDoc = null; app.dialog = null; render(); },
-  attend: d => { if (d.off) app.sel = null; return act("attend", "session.attend", { sid: d.sid, pid: d.pid, on: d.off ? false : $(`[data-act=attend][data-pid="${d.pid}"]`)?.getAttribute("aria-pressed") !== "true" }); },
+  attend: d => { if (d.off) app.sel = null; const s = sessById(d.sid); return act("attend", "session.attend", { sid: d.sid, pid: d.pid, on: d.off ? false : !(s && s.attending.includes(d.pid)) }); },
   attendAll: d => act("attend", "session.attendAll", { sid: d.sid, on: !!d.on }),
-  assign: d => { app.sel = null; return act("pools", "session.assign", d.pools ? { sid: d.sid, pools: +d.pools } : { sid: d.sid }); },
+  assign: d => { app.sel = null; app.confirm = null; return act("pools", "session.assign", d.pools ? { sid: d.sid, pools: +d.pools } : { sid: d.sid }); },
   pick: d => { app.sel = app.sel === d.pid ? null : d.pid; render(); },
   move: d => { app.sel = null; return act("pools", "session.move", { sid: d.sid, pid: d.pid, to: d.to }); },
   courts: d => act("pools", "session.pool", { sid: d.sid, pool: d.pool, courts: +d.courts }),
   start: async d => {
-    const s = sessById(d.sid);
-    if (!d.force && s && s.status === "setup" && outOfOrder(s).length) { app.dialog = { kind: "start", sid: d.sid }; return render(); }
-    app.dialog = null;
-    const j = await act("start", "session.start", { sid: d.sid }, "Session started");
-    if (j.ok) location.hash = "#/board";
+    if (!d.force) { app.dialog = { kind: "start", sid: d.sid, busy: false, err: "" }; return render(); }     // always a summary first
+    const j = await dialogRun("session.start", { sid: d.sid }, "Session started");
+    if (j.ok) whenSettled(() => { location.hash = "#/board"; });
   },
   unstart: d => act("live", "session.unstart", { sid: d.sid }),
-  delete: d => { app.confirm = null; return act("session", "session.delete", { sid: d.sid }, "Session deleted"); },
-  close: async d => { app.confirm = null; const j = await act("live", "session.close", { sid: d.sid }, "Session finished. Ratings updated."); if (j.ok) { app.tab = "ratings"; location.hash = "#/standings"; } },
-  reopen: async d => { app.confirm = null; const j = await act("history", "session.reopen", { sid: d.sid }, "Session reopened"); if (j.ok) location.hash = "#/org"; },
+  delete: d => { app.confirm = null; return d.force ? dialogRun("session.delete", { sid: d.sid, force: true }, "Session deleted", true) : act("session", "session.delete", { sid: d.sid }, "Session deleted"); },
+  close: async d => { app.confirm = null; backupLocal("session.close"); const j = await act("live", "session.close", { sid: d.sid }, "Session finished. Ratings updated."); if (j.ok) { app.tab = "ratings"; location.hash = "#/standings"; } },
+  reopen: async d => { app.confirm = null; backupLocal("session.reopen"); const j = await act("history", "session.reopen", { sid: d.sid }, "Session reopened"); if (j.ok) location.hash = "#/org"; },
   skip: d => act("live", "game.skip", { sid: d.sid, gid: d.gid, skip: !!d.skip }),
   edit: d => { app.edit = d.pid; app.form.rename = nm(d.pid); render(); },
   active: d => act("players", "player.update", { id: d.pid, active: !!d.on }),
@@ -1029,6 +1118,11 @@ document.addEventListener("touchmove", e => { if (drag.active) e.preventDefault(
 document.addEventListener("contextmenu", e => { if (drag.pid && drag.touch) e.preventDefault(); });
 let resizeTimer = 0;
 window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (!app.flow) render(); }, 150); });
-window.addEventListener("hashchange", () => { app.dialog = null; app.confirm = null; app.sel = null; app.edit = null; window.scrollTo(0, 0); render(); });
+window.addEventListener("popstate", () => {
+  overlayLeaving = false;
+  if (app.flow || app.dialog) { app.flow = null; app.dialog = null; render(); }      // Back pressed with a screen open: close it
+  afterOverlay.splice(0).forEach(fn => fn());
+});
+window.addEventListener("hashchange", () => { app.flow = null; app.err = {}; app.dialog = null; app.confirm = null; app.sel = null; app.edit = null; window.scrollTo(0, 0); render(); });
 
 boot();

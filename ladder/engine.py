@@ -11,11 +11,10 @@ so a result is worth the same whenever in the night it was played.
 """
 import itertools
 import math
-import random
 
 K_ELO = 100
 K_PROB = 8.988
-MAX_EXACT_ROUNDS = 8      # 8! = 40,320 orders; beyond that, sample
+MAX_EXACT_ROUNDS = 9      # 9! = 362,880 orders; beyond that, sample. Must match docs/core.js
 SAMPLE_ORDERS = 20000
 
 _cache = {}
@@ -23,6 +22,34 @@ _cache = {}
 
 def rnd(x):
     return math.floor(x + 0.5)
+
+
+_M = 0xFFFFFFFF
+
+
+def _rng(seed):
+    """The website's seeded generator (rng in docs/core.js), bit for bit, so both engines sample the same orders."""
+    h = (1779033703 ^ len(seed)) & _M
+    for ch in seed:
+        h = ((h ^ ord(ch)) * 3432918353) & _M
+        h = ((h << 13) | (h >> 19)) & _M
+    state = [h]
+
+    def rand():
+        a = state[0] = (state[0] + 0x6D2B79F5) & _M
+        t = ((a ^ (a >> 15)) * (1 | a)) & _M
+        t = ((t + (((t ^ (t >> 7)) * (61 | t)) & _M)) & _M) ^ t
+        return ((t ^ (t >> 14)) & _M) / 4294967296
+    return rand
+
+
+def _sampled_orders(n):
+    rand, order = _rng("orders-%d" % n), list(range(n))
+    for _ in range(SAMPLE_ORDERS):
+        for i in range(n - 1, 0, -1):          # the same shuffle, carried on from the previous order
+            j = int(rand() * (i + 1))
+            order[i], order[j] = order[j], order[i]
+        yield order
 
 
 def all_orders(start, rounds):
@@ -41,8 +68,7 @@ def all_orders(start, rounds):
     if len(rounds) <= MAX_EXACT_ROUNDS:
         orders = itertools.permutations(range(len(rounds)))
     else:
-        rng = random.Random(0)
-        orders = (rng.sample(range(len(rounds)), len(rounds)) for _ in range(SAMPLE_ORDERS))
+        orders = _sampled_orders(len(rounds))
     n = 0
     exp = math.exp
     for order in orders:

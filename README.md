@@ -43,7 +43,10 @@ Needs Python 3.10 or later and nothing else. It prints the address for other dev
 
 ```
 node tests/core.test.js
+node tests/backend.test.js
 python -m unittest discover -s tests
 ```
+
+`backend.test.js` drives the website's database code against an in-memory stand-in for Firebase (`tests/fake-firebase`), including a second device writing at the same moment. `tests/parity.json` holds numbers written by the JavaScript rating engine that the Python engine must reproduce.
 
 The Python tests and the rating comparison need league data that is not in this repository, and skip themselves without it.

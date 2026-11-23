@@ -34,6 +34,18 @@ class EngineTest(unittest.TestCase):
         self.assertEqual(sum(t["w"] for t in totals.values()), games * 2)
 
 
+class ParityTest(unittest.TestCase):
+    def test_sampled_average_matches_the_website(self):
+        """Same input as tests/core.test.js; the expected numbers in parity.json were written by the JavaScript engine."""
+        from ladder import engine
+        start = {"p%d" % i: 3100 + 100 * i for i in range(7)}
+        rounds = [[("g%d" % r, ("p%d" % (r % 7), "p%d" % ((r + 1) % 7)), ("p%d" % ((r + 3) % 7), "p%d" % ((r + 5) % 7)), 11, (r * 3) % 10)] for r in range(14)]
+        ends, _ = engine.all_orders(start, rounds)
+        with open(os.path.join(os.path.dirname(__file__), "parity.json"), encoding="utf-8") as f:
+            expected = json.load(f)["ends"]
+        self.assertEqual([int(ends[p] * 1000 + 0.5) for p in sorted(start)], expected)
+
+
 class SchedulerTest(unittest.TestCase):
     def test_eight_is_full_whist(self):
         players = ["p%d" % i for i in range(8)]
@@ -153,7 +165,10 @@ class StoreTest(unittest.TestCase):
         with self.assertRaises(ActionError) as cm:
             st.apply("game.score", dict(sid=sid, gid=gid, s1=11, s2=9, replace=True), org=False)
         self.assertEqual(cm.exception.code, "pin")
-        st.apply("game.score", dict(sid=sid, gid=gid, s1=4, s2=11, replace=True), org=True)
+        with self.assertRaises(ActionError) as cm:
+            st.apply("game.score", dict(sid=sid, gid=gid, s1=4, s2=11, replace=True), org=True)
+        self.assertEqual(cm.exception.code, "closed")
+        st.apply("game.score", dict(sid=sid, gid=gid, s1=4, s2=11, replace=True, history=True), org=True)
         self.assertNotEqual(st.state["ratings"]["current"], after)
 
         # state survives a restart
@@ -176,6 +191,46 @@ class StoreTest(unittest.TestCase):
             st.apply("session.create", dict(date="2026-11-16"), org=True)
         self.assertEqual(cm.exception.code, "date")
         st.apply("session.create", dict(date="2026-11-23"), org=True)
+
+    def test_failed_action_leaves_nothing_behind(self):
+        st = self.store
+        name, version = st.state["league"]["name"], st.state["version"]
+        with self.assertRaises(ActionError):
+            st.apply("league.update", dict(name="Half Applied", pointsToWin="abc"), org=True)
+        self.assertEqual(st.state["league"]["name"], name)
+        self.assertEqual(st.state["version"], version)
+        for bad in ("", "15.5", "99"):
+            with self.assertRaises(ActionError) as cm:
+                st.apply("league.update", dict(pointsToWin=bad), org=True)
+            self.assertEqual(cm.exception.code, "invalid")
+
+    def test_score_safety_and_reopen(self):
+        st = self.store
+        sid = st.apply("session.create", dict(date="2026-11-23"), org=True)["id"]
+        sess = st.state["sessions"][-1]
+        st.apply("session.assign", dict(sid=sid), org=True)
+        st.apply("session.start", dict(sid=sid), org=True)
+        self.assertEqual(sess["pointsToWin"], 11)
+        pool = sess["pools"][0]
+        gid, g2, by_hand = pool["rounds"][0][0], pool["rounds"][0][1], pool["rounds"][1][0]
+        with self.assertRaises(ActionError) as cm:
+            st.apply("game.score", dict(sid=sid, gid=gid, s1=12, s2=10), org=False)
+        self.assertEqual(cm.exception.code, "invalid")
+        st.apply("game.score", dict(sid=sid, gid=gid, s1=11, s2=7), org=False)
+        st.apply("game.score", dict(sid=sid, gid=gid, s1=9, s2=11, replace=True), org=False)
+        with self.assertRaises(ActionError) as cm:
+            st.apply("game.score", dict(sid=sid, gid=gid, s1=11, s2=2, replace=True, was=dict(s1=11, s2=7)), org=False)
+        self.assertEqual(cm.exception.code, "exists")
+        self.assertEqual((sess["games"][gid]["s1"], sess["games"][gid]["s2"]), (9, 11))
+        st.apply("game.skip", dict(sid=sid, gid=by_hand), org=True)
+        st.apply("session.close", dict(sid=sid), org=True)
+        st.apply("session.reopen", dict(sid=sid), org=True)
+        self.assertEqual(sess["games"][g2]["status"], "pending")
+        self.assertEqual(sess["games"][by_hand]["status"], "skipped")
+        with self.assertRaises(ActionError) as cm:
+            st.apply("session.delete", dict(sid=sid), org=True)
+        self.assertEqual(cm.exception.code, "scores")
+        st.apply("session.delete", dict(sid=sid, force=True), org=True)
 
     def test_reset_session(self):
         st = self.store

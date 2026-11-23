@@ -286,7 +286,11 @@
   H["league.update"] = (st, a) => {
     if ("name" in a) { const name = String(a.name).trim(); if (!name) fail("invalid", "League name cannot be empty."); st.league.name = name.slice(0, 80); }
     if ("nameStyle" in a) { if (a.nameStyle !== "short" && a.nameStyle !== "full") fail("invalid", "Choose short or full names."); st.league.nameStyle = a.nameStyle; }
-    if ("pointsToWin" in a) { const pts = parseInt(a.pointsToWin, 10); if (!(pts >= 5 && pts <= 21)) fail("invalid", "Points to win must be between 5 and 21."); st.league.pointsToWin = pts; }
+    if ("pointsToWin" in a) {
+      const raw = String(a.pointsToWin).trim(), pts = /^\d+$/.test(raw) ? parseInt(raw, 10) : NaN;
+      if (!(pts >= 5 && pts <= 21)) fail("invalid", "Points to win must be a whole number from 5 to 21.");
+      st.league.pointsToWin = pts;
+    }
   };
   H["player.add"] = (st, a) => {
     const name = checkName(st, a.name), seed = seedOf(a.seed != null ? a.seed : st.league.seeds[st.league.seeds.length - 1] / 1000);
@@ -389,21 +393,34 @@
       }));
     }
   };
-  H["session.start"] = (st, a, org) => { const s = getSession(st, a.sid, "setup"); if (!Object.keys(s.games).length) H["session.schedule"](st, a, org); s.status = "live"; };
+  H["session.start"] = (st, a, org) => {
+    const s = getSession(st, a.sid, "setup");
+    if (!Object.keys(s.games).length) H["session.schedule"](st, a, org);
+    s.status = "live";
+    s.pointsToWin = st.league.pointsToWin;      // the session keeps the target it started with, whatever the league setting does later
+  };
+  const targetOf = (st, s) => s.pointsToWin || st.league.pointsToWin;
   H["session.unstart"] = (st, a) => { const s = getSession(st, a.sid, "live"); if (doneGames(s).length) fail("scores", "Scores have been entered, so the session cannot go back to setup."); s.status = "setup"; s.pools.forEach(p => { p.confirmed = 0; }); };
   /* Back to a fresh start for the same draw: no scores, every pool on round 1. */
   H["session.reset"] = (st, a) => {
     const s = getSession(st, a.sid, "live");
-    for (const g of Object.values(s.games)) { g.s1 = null; g.s2 = null; g.status = "pending"; delete g.at; }
+    for (const g of Object.values(s.games)) { g.s1 = null; g.s2 = null; g.status = "pending"; delete g.at; delete g.auto; }
     s.pools.forEach(p => { p.confirmed = 0; });
     return { games: Object.keys(s.games).length };
   };
-  H["session.delete"] = (st, a) => { const s = getSession(st, a.sid, "setup", "live"); if (doneGames(s).length) fail("scores", "Scores have been entered. Finish the session instead."); st.sessions = st.sessions.filter(x => x !== s); };
+  /* Deleting a session that has scores takes an explicit yes (force), because the scores go with it. */
+  H["session.delete"] = (st, a) => {
+    const s = getSession(st, a.sid, "setup", "live");
+    if (doneGames(s).length && !a.force) fail("scores", "Scores have been entered. Deleting the session deletes them too.");
+    st.sessions = st.sessions.filter(x => x !== s);
+  };
 
   function getGame(st, a, org) {
     const s = getSession(st, a.sid);
     if (s.status === "setup") fail("status", "The session has not started.");
     if (s.status === "closed" && !org) fail("pin", "This session is finished. Only the organiser can change it.");
+    /* a score screen left open on a phone must not write into a night that has since been finished */
+    if (s.status === "closed" && !a.history) fail("closed", "This session has been finished. Its scores can only be changed from Organiser, History.");
     return { s, g: s.games[a.gid] || fail("missing", "Game not found.") };
   }
   function checkScore(a) {
@@ -413,19 +430,26 @@
     return { s1, s2 };
   }
   /* The rule for one game, shared with the database transaction used when many phones score at once. */
-  function scoreGame(g, a, org) {
+  function scoreGame(g, a, org, target) {
     const { s1, s2 } = checkScore(a);
+    if (target && Math.max(s1, s2) > target) fail("invalid", `Games are first to ${target}, so the winning score cannot be more than ${target}.`);
     if (g.status === "skipped" && !org) fail("skipped", "This game was marked as not played.");
-    if (g.status === "done" && !a.replace && (g.s1 !== s1 || g.s2 !== s2)) fail("exists", `Already entered as ${g.s1}-${g.s2}.`, { s1: g.s1, s2: g.s2 });
-    return Object.assign({}, g, { s1, s2, status: "done", at: Math.floor(Date.now() / 1000) });
+    if (g.status === "done" && (g.s1 !== s1 || g.s2 !== s2)) {
+      /* replace needs the caller to have seen the score it is replacing: a.was is what its screen showed */
+      const stale = a.was && (a.was.s1 !== g.s1 || a.was.s2 !== g.s2);
+      if (!a.replace || stale) fail("exists", `Already entered as ${g.s1}-${g.s2}.`, { s1: g.s1, s2: g.s2 });
+    }
+    const out = Object.assign({}, g, { s1, s2, status: "done", at: Math.floor(Date.now() / 1000) });
+    delete out.auto;
+    return out;
   }
-  H["game.score"] = (st, a, org) => { const { s, g } = getGame(st, a, org); s.games[g.id] = scoreGame(g, a, org); if (s.status === "closed") recompute(st); };
+  H["game.score"] = (st, a, org) => { const { s, g } = getGame(st, a, org); s.games[g.id] = scoreGame(g, a, org, targetOf(st, s)); if (s.status === "closed") recompute(st); };
   H["game.clear"] = (st, a, org) => {
     const { s, g } = getGame(st, a, org);
-    g.s1 = null; g.s2 = null; g.status = s.status === "closed" ? "skipped" : "pending"; delete g.at;
+    g.s1 = null; g.s2 = null; g.status = s.status === "closed" ? "skipped" : "pending"; delete g.at; delete g.auto;
     if (s.status === "closed") recompute(st);
   };
-  H["game.skip"] = (st, a, org) => { const { g } = getGame(st, a, org); if (g.status === "done") fail("scores", "Clear the score first."); g.status = a.skip === false ? "pending" : "skipped"; };
+  H["game.skip"] = (st, a, org) => { const { g } = getGame(st, a, org); if (g.status === "done") fail("scores", "Clear the score first."); g.status = a.skip === false ? "pending" : "skipped"; delete g.auto; };
   /* A round is ready to confirm when none of its games is still waiting for a score. */
   const roundReady = (s, pool, round) => (pool.rounds[round] || []).length > 0 && pool.rounds[round].every(id => s.games[id] && s.games[id].status !== "pending");
   H["round.confirm"] = (st, a) => {
@@ -451,25 +475,30 @@
     if (s.pools.some(p => p.players.includes(neu))) fail("duplicate", `${pNew.name} is already playing in this session.`);
     let changed = 0;
     for (const g of Object.values(s.games)) if (g.pool === pool.id && g.status !== "done") for (const t of ["t1", "t2"]) if (g[t].includes(out)) { g[t] = g[t].map(p => (p === out ? neu : p)); changed++; }
-    if (doneGames(s).some(g => g.t1.concat(g.t2).includes(out))) pool.players.push(neu);
-    else { pool.players[pool.players.indexOf(out)] = neu; s.attending = s.attending.filter(p => p !== out); }
+    /* the replacement takes the leaver's place in the pool; someone who already played stays on the attendance list for the record */
+    pool.players[pool.players.indexOf(out)] = neu;
+    if (!doneGames(s).some(g => g.t1.concat(g.t2).includes(out))) s.attending = s.attending.filter(p => p !== out);
     if (!s.attending.includes(neu)) s.attending.push(neu);
     return { games: changed };
   };
-  H["session.close"] = (st, a) => {
-    const s = getSession(st, a.sid, "live");
-    if (!doneGames(s).length) fail("scores", "No scores have been entered. Delete the session instead of finishing it.");
-    Object.values(s.games).forEach(g => { if (g.status === "pending") g.status = "skipped"; });
+  /* Finish one session object in place. Shared with the database transaction, so it copes with a raw database record. */
+  function closeSession(s) {
+    if (s.status !== "live") fail("status", `This session is ${s.status}, so that is not possible.`);
+    const games = Object.values(s.games || {});
+    if (!games.some(g => g.status === "done")) fail("scores", "No scores have been entered. Delete the session instead of finishing it.");
+    games.forEach(g => { if (g.status === "pending") { g.status = "skipped"; g.auto = true; } });   // auto: skipped by Finish, not by a person
     s.status = "closed";
-    recompute(st);
-  };
+    s.wasClosed = true;
+    return s;
+  }
+  H["session.close"] = (st, a) => { closeSession(getSession(st, a.sid, "live")); recompute(st); };
   H["session.reopen"] = (st, a) => {
     const s = getSession(st, a.sid, "closed");
     if (openSession(st)) fail("open", "Another session is already open.");
     const closed = st.sessions.filter(x => x.status === "closed").sort((x, y) => (x.date + "|" + x.id < y.date + "|" + y.id ? -1 : 1));
     if (closed[closed.length - 1] !== s) fail("order", "Only the most recent session can be reopened.");
     s.status = "live";
-    Object.values(s.games).forEach(g => { if (g.status === "skipped") g.status = "pending"; });
+    Object.values(s.games).forEach(g => { if (g.status === "skipped" && g.auto) { g.status = "pending"; delete g.auto; } });   // games marked not played by hand stay that way
     recompute(st);
   };
 
@@ -483,6 +512,6 @@
     return result;
   }
 
-  Object.assign(L, { rng, allOrders, compute, roundCount, generate, summary, emptyState, normalize, apply, scoreGame, checkScore, roundReady,
+  Object.assign(L, { rng, allOrders, compute, roundCount, generate, summary, emptyState, normalize, apply, scoreGame, checkScore, roundReady, closeSession,
     ActionError, OPEN_ACTIONS, MIN_POOL, MAX_POOL });
 })(typeof module !== "undefined" && module.exports ? module.exports : (window.Ladder = {}));
