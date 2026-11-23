@@ -325,13 +325,14 @@ table.wk td { white-space: nowrap; }
 .board .names.lost { font-weight: 650; }
 .board .mid { background: var(--soft); padding-left: 11px; }
 .board .bmatch.is-done .mid { grid-column: 1 / -1; }
-/* every score in the round is in: the band is the Confirm round button, on each card */
-.board .mid.go { background: var(--grad); padding: 0; }
-.confirmbtn { flex: 1; align-self: stretch; border: 0; background: transparent; color: var(--on-brand); font: inherit; font-size: clamp(15px, 1.6vw, 20px); font-weight: 850; letter-spacing: .02em; text-align: left; padding: 0 11px; display: flex; align-items: center; justify-content: space-between; gap: 8px; white-space: nowrap; cursor: pointer; }
-.confirmbtn i { font-style: normal; font-size: 1.3em; line-height: 1; }
-.confirmbtn:active { background: rgba(0, 0, 0, .1); }
-.confirmbtn:focus-visible { outline: 3px solid var(--ink); outline-offset: -3px; }
-.board .bmatch.is-done .mid.go .confirmbtn { margin-right: var(--ptsw); }
+/* every score in the round is in: the band goes black and carries an orange Confirm round button, on each card */
+.board .mid.go { background: var(--chrome); padding: 0 6px; }
+.confirmbtn { flex: 1; align-self: center; min-height: calc(var(--midh) - 10px); border: 0; border-radius: 99px; background: var(--grad); color: var(--on-brand); font: inherit; font-size: clamp(14.5px, 1.55vw, 19px); font-weight: 850; letter-spacing: .01em; padding: 0 10px 0 14px; display: flex; align-items: center; justify-content: space-between; gap: 6px; white-space: nowrap; cursor: pointer; }
+.confirmbtn i { font-style: normal; font-size: 1.35em; line-height: 1; }
+.confirmbtn:active { filter: brightness(.92); }
+.confirmbtn:focus-visible { outline: 3px solid var(--on-chrome); outline-offset: 2px; }
+.board .bmatch.is-done .mid.go .confirmbtn { margin-right: calc(var(--ptsw) - 2px); }
+.board .mid.go ~ .editbtn { background: var(--on-chrome); color: var(--chrome); }
 .board .vsl { font-size: clamp(12.5px, 1.35vw, 16px); text-transform: uppercase; letter-spacing: .08em; }
 .board .vsl i { color: var(--brand-text); font-weight: 850; }
 .board .vsl b { color: var(--ink); font-weight: 800; }
