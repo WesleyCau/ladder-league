@@ -992,7 +992,7 @@ const A = {
   tab: d => { app.tab = d.tab; render(); },
   hl: d => togglePlayer(d.pid),
   hon: d => togglePlayer(d.pid, true),
-  history: d => { app.hs = { start: [], now: [], custom: true, on: [{ id: d.pid, slot: 1 }] }; app.tab = "history"; render(); window.scrollTo(0, 0); },
+  history: d => { app.hs = { start: [], now: [], custom: true, on: [{ id: d.pid, slot: 1 }] }; app.tab = "history"; render(); toTop(); },
   hfilter: d => {
     const hs = app.hs; if (!hs) return;
     if (hs.custom) { hs.start = []; hs.now = []; hs.custom = false; }
