@@ -123,7 +123,7 @@ function matchCard(s, g, opts = {}) {
   const side = (ids, pts, won) => `<div class="side ${done ? (won ? "won" : "lost") : ""}"><div class="names">${team(ids)}</div>${opts.preview ? "" : `<div class="pts">${done ? pts : ""}</div>`}</div>`;
   const tag = opts.label ? `<span class="ct">${opts.label}</span>` : "";
   const button = opts.preview ? "" : skipped ? `<p class="muted np">${tag}Not played</p>`
-    : `<button class="btn huge ${done ? "quiet" : "primary"}" data-act="flow" data-sid="${s.id}" data-gid="${g.id}">${tag}<span>${done ? "Change score" : "Enter score"}</span></button>`;
+    : `<button class="btn huge ${done ? "quiet" : "primary"}" data-act="flow" data-sid="${s.id}" data-gid="${g.id}">${tag}<span>${done ? "Edit score" : "Enter score"}</span></button>`;
   return `<div class="match ${done ? "is-done" : skipped ? "is-skipped" : opts.preview ? "is-preview" : "is-live"}">
     ${side(g.t1, g.s1, g.s1 > g.s2)}${side(g.t2, g.s2, g.s2 > g.s1)}${button}</div>`;
 }

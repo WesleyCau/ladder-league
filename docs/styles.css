@@ -122,6 +122,7 @@ label.field { display: flex; flex-direction: column; gap: 4px; font-size: 14px; 
 .match.is-live { border: 2px solid var(--brand); padding: 5px 13px 11px; }
 .btn .ct, .np .ct { font-size: .58em; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; opacity: .75; white-space: nowrap; }
 .btn.huge { gap: .5em; }
+.btn.huge span { white-space: nowrap; }
 .np { display: flex; gap: .6em; align-items: baseline; padding-top: 6px; }
 .side { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 6px 0; }
 .side + .side { border-top: 1px solid var(--line); }
