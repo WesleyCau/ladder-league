@@ -170,6 +170,8 @@ function boardCard(s, g, label) {
 }
 /* Three looks for the All courts cards, chosen per device while they are being compared. */
 const BOARD_STYLES = { 1: "A. Open", 2: "B. Band", 3: "C. Tall" };
+/* Pool heading on All courts: name left and round right ("split"), or both together in the middle ("centre"). */
+function boardHead() { let v = "split"; try { v = localStorage.getItem("ladder-board-head") || "split"; } catch (e) { /* storage blocked */ } return v === "centre" ? "centre" : "split"; }
 function boardStyle() { let v = "1"; try { v = localStorage.getItem("ladder-board-style") || "1"; } catch (e) { /* storage blocked */ } return BOARD_STYLES[v] ? v : "1"; }
 /* Width of the widest name in a layout's own typeface, in ems, measured in the page so any font works. */
 function boardNameEm(style, names) {
@@ -320,7 +322,7 @@ function viewBoard() {
   const s = openSess();
   if (!s || s.status !== "live") return `<div class="head"><h1>All courts</h1><p class="muted">No session is live. Current games appear here once the organiser starts one.</p></div>`;
   return `${errLine("court")}
-    <div class="board bs-${boardStyle()}" style="${fit(s)}">${s.pools.map(p => {
+    <div class="board bs-${boardStyle()} bh-${boardHead()}" style="${fit(s)}">${s.pools.map(p => {
       const r = roundInfo(s, p);
       return `<div class="stack">
         <div class="row spread bhead"><h2><a href="#/court/${p.id}">${esc(p.name)}</a></h2><span class="round">${r.finished ? "Finished" : `Round ${r.at + 1} of ${r.total}`}</span></div>
@@ -333,6 +335,8 @@ function viewBoard() {
 
 const boardSwitch = () => `<div class="row bsw"><span class="muted small">Card layout on this device</span>
   <span class="seg slim" role="group" aria-label="Card layout">${Object.keys(BOARD_STYLES).map(k => `<button data-act="bstyle" data-style="${k}" aria-pressed="${boardStyle() === k}">${BOARD_STYLES[k]}</button>`).join("")}</span>
+  <span class="muted small">Pool heading</span>
+  <span class="seg slim" role="group" aria-label="Pool heading">${[["split", "Split"], ["centre", "Centred"]].map(([k, l]) => `<button data-act="bhead" data-head="${k}" aria-pressed="${boardHead() === k}">${l}</button>`).join("")}</span>
   <a class="btn small" href="#/board/options">Compare side by side</a></div>`;
 /* The same two games in each layout, at the size they are on this screen. */
 function viewBoardOptions() {
@@ -343,9 +347,10 @@ function viewBoardOptions() {
   const s = { id: "sample", status: "live", pools: [0, 1, 2, 3].map(pool), games: { x1: game("x1", [ids[0], ids[5]], [ids[2], ids[7]]), x2: game("x2", [ids[1], ids[4]], [ids[3], ids[6]], { s1: 11, s2: 7, status: "done" }) } };
   return `<a class="back" href="#/board">‹ All courts</a>
     <div class="head"><h1>All courts: three layouts</h1><p class="muted">The same two games in each layout, with the longest names in the league, at the size they are on this screen. Choose one to use it on this device.</p></div>
+    <div class="row"><span class="muted small">Pool heading</span><span class="seg slim" role="group" aria-label="Pool heading">${[["split", "Split"], ["centre", "Centred"]].map(([k, l]) => `<button data-act="bhead" data-head="${k}" aria-pressed="${boardHead() === k}">${l}</button>`).join("")}</span></div>
     <div class="bopts" style="${fit(s, "1")}">${Object.keys(BOARD_STYLES).map(k => `<div class="bopt">
       <button class="btn ${boardStyle() === k ? "primary" : ""}" data-act="bstyle" data-style="${k}">${BOARD_STYLES[k]}${boardStyle() === k ? " (in use)" : ""}</button>
-      <div class="board bs-${k}" style="${fit(s, k)}"><div class="stack">
+      <div class="board bs-${k} bh-${boardHead()}" style="${fit(s, k)}"><div class="stack">
         <div class="row spread bhead"><h2>Pool A</h2><span class="round">Round 1 of 7</span></div>
         ${boardCard(s, s.games.x1, "Court 1")}${boardCard(s, s.games.x2, "Court 2")}
         <div class="slot wait">1 score to go</div></div></div></div>`).join("")}</div>`;
@@ -976,6 +981,7 @@ const A = {
   backRound: d => { app.confirm = null; return act("court", "round.back", { sid: d.sid, pool: d.pool }, "Back one round"); },
   nameStyle: d => act("league", "league.update", { nameStyle: d.style }),
   tab: d => { app.tab = d.tab; render(); },
+  bhead: d => { try { localStorage.setItem("ladder-board-head", d.head); } catch (e) { /* storage blocked */ } render(); },
   bstyle: d => { try { localStorage.setItem("ladder-board-style", d.style); } catch (e) { /* storage blocked */ } render(); },
   hl: d => togglePlayer(d.pid),
   hon: d => togglePlayer(d.pid, true),
