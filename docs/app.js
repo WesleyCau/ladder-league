@@ -725,6 +725,7 @@ function orgSetup(s) {
 
 function orgLive(s) {
   const pend = Object.values(s.games).filter(g => g.status === "pending").length;
+  const open = Object.values(s.games).filter(g => g.status !== "done"), marked = open.filter(g => g.status === "skipped").length;
   const done = Object.values(s.games).filter(g => g.status === "done").length;
   const inPools = s.pools.flatMap(p => p.players);
   const bench = Object.values(app.st.players).filter(p => p.active && !inPools.includes(p.id)).sort((a, b) => a.name.localeCompare(b.name));
@@ -753,10 +754,12 @@ function orgLive(s) {
       <button class="btn" type="submit">Substitute</button></div>
     <p class="muted">Replacement not listed? Add them under Players first.</p>${errLine("sub")}</form>
 
-  <div class="card"><h2>Games not played</h2><p class="muted">Mark a game as not played if it will not happen tonight.</p>
-    ${s.pools.map(p => { const gs = poolGames(s, p).filter(g => g.status !== "done");
+  <div class="card"><div class="row spread"><h2>Games not played</h2>
+      ${open.length ? `<button class="btn small${app.showSkip ? "" : " primary"}" data-act="toggleSkip">${app.showSkip ? "Hide the list" : "Choose games"}</button>` : ""}</div>
+    <p class="muted">Mark a game as not played if it will not happen tonight. ${!open.length ? "Every game has a score." : `${open.length === 1 ? "1 game has" : open.length + " games have"} no score${marked ? `, ${marked} marked not played` : ""}.`}</p>
+    ${!app.showSkip || !open.length ? "" : s.pools.map(p => { const gs = poolGames(s, p).filter(g => g.status !== "done");
       return gs.length ? `<h3>${esc(p.name)}</h3><div class="results">${gs.map(g => `<div class="res"><span class="rd">R${g.round + 1}</span><span class="who">${teamLine(g.t1)} v ${teamLine(g.t2)}${g.status === "skipped" ? ' <span class="sc muted">not played</span>' : ""}</span>
-        <button class="btn small" data-act="skip" data-sid="${s.id}" data-gid="${g.id}" data-skip="${g.status === "skipped" ? "" : "1"}">${g.status === "skipped" ? "Restore" : "Not played"}</button></div>`).join("")}</div>` : ""; }).join("") || '<p class="muted">Every game has a score.</p>'}</div>`;
+        <button class="btn small" data-act="skip" data-sid="${s.id}" data-gid="${g.id}" data-skip="${g.status === "skipped" ? "" : "1"}">${g.status === "skipped" ? "Restore" : "Not played"}</button></div>`).join("")}</div>` : ""; }).join("")}</div>`;
 }
 
 function orgPlayers() {
@@ -984,6 +987,7 @@ const A = {
   backRound: d => { app.confirm = null; return act("court", "round.back", { sid: d.sid, pool: d.pool }, "Back one round"); },
   nameStyle: d => act("league", "league.update", { nameStyle: d.style }),
   fullscreen: () => fsToggle(),
+  toggleSkip: () => { app.showSkip = !app.showSkip; render(); },
   tab: d => { app.tab = d.tab; render(); },
   hl: d => togglePlayer(d.pid),
   hon: d => togglePlayer(d.pid, true),
@@ -1184,6 +1188,6 @@ window.addEventListener("popstate", () => {
   if (app.flow || app.dialog) { app.flow = null; app.dialog = null; render(); }      // Back pressed with a screen open: close it
   afterOverlay.splice(0).forEach(fn => fn());
 });
-window.addEventListener("hashchange", () => { app.flow = null; app.err = {}; app.dialog = null; app.confirm = null; app.sel = null; app.edit = null; toTop(); render(); });
+window.addEventListener("hashchange", () => { app.showSkip = false; app.flow = null; app.err = {}; app.dialog = null; app.confirm = null; app.sel = null; app.edit = null; toTop(); render(); });
 
 boot();
