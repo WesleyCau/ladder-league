@@ -9,7 +9,7 @@ const Backends = (() => {
   function failure(e) {
     if (e instanceof Ladder.ActionError) return Object.assign({ ok: false, code: e.code, message: e.message }, e.extra);
     const text = String((e && (e.code || e.message)) || e);
-    if (/permission/i.test(text)) return { ok: false, code: "pin", message: "That needs the organiser to be signed in." };
+    if (/permission/i.test(text)) return { ok: false, code: "pin", message: "The database refused that change. Organiser access is not switched on there." };
     console.error(e);
     return { ok: false, code: "error", message: "Something went wrong. Check the connection and try again." };
   }
@@ -35,6 +35,7 @@ const Backends = (() => {
   /* ---------------- the Python server ---------------- */
   function server(onState, onOnline, first) {
     let version = null, pin = sessionStorage.getItem("ladder-pin") || "";
+    const open = !!(window.LADDER_CONFIG || {}).openOrganiser;
     const take = j => { version = j.version; onState({ state: j.state, urls: j.urls || [] }); };
     async function post(type, args, withPin) {
       try {
@@ -52,7 +53,7 @@ const Backends = (() => {
     }
     const lock = () => { pin = ""; sessionStorage.removeItem("ladder-pin"); };
     return {
-      kind: "server", orgMode: "pin", isOrg: () => !!pin, signOut: lock,
+      kind: "server", orgMode: open ? "open" : "pin", isOrg: () => open || !!pin, signOut: lock,
       start() { take(first); setTimeout(poll, 2000); },
       async send(type, args) {
         const j = await post(type, args);
@@ -74,7 +75,8 @@ const Backends = (() => {
     const [{ initializeApp }, db, au] = await Promise.all([import(base + "firebase-app.js"), import(base + "firebase-database.js"), import(base + "firebase-auth.js")]);
     const fbApp = initializeApp(cfg), database = db.getDatabase(fbApp), auth = au.getAuth(fbApp);
     let state = Ladder.emptyState(), admins = {}, user = null, loaded = false;
-    const isOrg = () => !!(user && admins[user.uid]);
+    const open = !!(window.LADDER_CONFIG || {}).openOrganiser;      // no login: the database rules must allow it too
+    const isOrg = () => open || !!(user && admins[user.uid]);
     const emit = () => { if (loaded) onState({ state, urls: [] }); };
     const isObj = x => x !== null && typeof x === "object" && !Array.isArray(x);
     /* The database keys sessions by id so one game can be written on its own. */
@@ -121,7 +123,7 @@ const Backends = (() => {
     }
 
     return {
-      kind: "firebase", orgMode: "account", isOrg,
+      kind: "firebase", orgMode: open ? "open" : "account", isOrg,
       hasOrganiser: () => Object.keys(admins).length > 0,
       signedInNotOrganiser: () => !!user && !admins[user.uid],
       start() {

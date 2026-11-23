@@ -27,7 +27,9 @@ The site in `docs/` picks the mode itself: Firebase if `docs/config.js` has the 
 6. Open the site, go to **Organiser**, and create the organiser account. The first account created becomes the organiser; nobody else can claim it afterwards.
 7. To bring in an existing league, **Organiser > Settings > Load a league file**.
 
-Anyone with the link can read the league and enter scores during a live session. Only the organiser account can change players, pools, sessions or finished scores. The Firebase config values are not secret; the database rules are what protect the data.
+**Organiser login is switched off for now.** `openOrganiser: true` in `docs/config.js` plus the open rules in `database.rules.json` mean anyone with the link can use the organiser tools, so save a copy (Organiser > Settings) before each session.
+
+To switch the login back on: set `openOrganiser: false`, publish `database.rules.login.json` in the Rules tab, and sign in with the organiser account. With those rules anyone can read the league and enter scores during a live session, and only the organiser account can change players, pools, sessions or finished scores. The Firebase config values are not secret; the database rules are what protect the data.
 
 ## Local server
 
@@ -35,7 +37,7 @@ Anyone with the link can read the league and enter scores during a live session.
 python server.py
 ```
 
-Needs Python 3.10 or later and nothing else. It prints the address for other devices and creates `data/config.json` with the organiser PIN on first run.
+Needs Python 3.10 or later and nothing else. It prints the address for other devices and creates `data/config.json` on first run. The organiser PIN in that file is not asked for unless you add `"open": false` to it.
 
 ## Tests
 

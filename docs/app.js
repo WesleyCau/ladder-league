@@ -18,6 +18,8 @@ const app = {
   form: {},          // values of inputs with an id, kept across re-renders
   err: {},           // message per area
   tab: "ratings",
+  hl: null,          // players highlighted on the ratings chart: [{ id, slot }]
+  chart: null,       // geometry of the chart on screen, for hover and tap
 };
 
 /* ---------- backend ---------- */
@@ -119,19 +121,53 @@ const errLine = area => (app.err[area] ? `<p class="err" role="alert">${esc(app.
 function matchCard(s, g, opts = {}) {
   const done = g.status === "done", skipped = g.status === "skipped";
   const side = (ids, pts, won) => `<div class="side ${done ? (won ? "won" : "lost") : ""}"><div class="names">${team(ids)}</div>${opts.preview ? "" : `<div class="pts">${done ? pts : ""}</div>`}</div>`;
-  const button = opts.preview ? "" : skipped ? '<p class="muted">Marked as not played.</p>'
-    : `<button class="btn huge ${done ? "quiet" : "primary"}" data-act="flow" data-sid="${s.id}" data-gid="${g.id}">${done ? "Change score" : "Enter score"}</button>`;
+  const tag = opts.label ? `<span class="ct">${opts.label}</span>` : "";
+  const button = opts.preview ? "" : skipped ? `<p class="muted np">${tag}Not played</p>`
+    : `<button class="btn huge ${done ? "quiet" : "primary"}" data-act="flow" data-sid="${s.id}" data-gid="${g.id}">${tag}<span>${done ? "Change score" : "Enter score"}</span></button>`;
   return `<div class="match ${done ? "is-done" : skipped ? "is-skipped" : opts.preview ? "is-preview" : "is-live"}">
-    ${opts.label ? `<span class="tag">${opts.label}</span>` : ""}
     ${side(g.t1, g.s1, g.s1 > g.s2)}${side(g.t2, g.s2, g.s2 > g.s1)}${button}</div>`;
 }
 function roundCards(s, pool, r) {
   let waiting = 0;
-  return r.games.map((g, i) => {
-    const label = g.status === "done" ? "Score entered" : g.status === "skipped" ? "Not played"
-      : pool.courts > 1 ? `Court ${i + 1}` : waiting++ === 0 ? "On court now" : "On court next";
-    return matchCard(s, g, { label });
-  }).join("");
+  return r.games.map((g, i) => matchCard(s, g, { label: pool.courts > 1 ? `Court ${i + 1}` : g.status !== "pending" ? "" : waiting++ === 0 ? "Now" : "Next" })).join("");
+}
+/* Type sizes for the wide screens (board and draw) that keep every name and every pair on one line, whatever the names are. */
+const emCache = new Map();
+function emWidth(text, weight) {
+  const key = weight + text;
+  if (!emCache.has(key)) {
+    emWidth.ctx = emWidth.ctx || document.createElement("canvas").getContext("2d");
+    emWidth.ctx.font = `${weight} 100px ${getComputedStyle(document.body).fontFamily}`;
+    emCache.set(key, emWidth.ctx.measureText(text).width / 100);
+  }
+  return emCache.get(key);
+}
+function fit(s) {
+  const vw = document.documentElement.clientWidth, n = s.pools.length;
+  if (vw < 900 || !n) return "";
+  const col = (Math.min(1400, vw) - 24 - 10 * (n - 1)) / n, cap = (lo, v, hi) => Math.max(lo, Math.min(hi, Math.floor(v * 10) / 10));
+  const names = s.pools.flatMap(p => p.players).map(sn), pairs = Object.values(s.games).flatMap(g => [g.t1, g.t2]).map(t => t.map(sn).join(" / "));
+  const name = Math.max(...names.map(x => emWidth(x, 800))), pair = Math.max(...pairs.map(x => emWidth(x, 700)));
+  const pts = Math.min(62, Math.max(44, vw * 0.048)) * 1.15;
+  return `--n:${n};--fit-name:${cap(16, (col - 30 - pts) / name, 34)}px;--fit-pair:${cap(13, (col - 42) / pair, 23)}px;--fit-draw:${cap(12, (col - 68) / pair, 18)}px`;
+}
+/* Tonight: one pool's whole draw. Every round, both courts, scores as they come in. */
+function drawPool(s, p) {
+  const r = roundInfo(s, p);
+  return `<section class="dpool">
+    <a class="dp-head" href="#/court/${p.id}"><h2>${esc(p.name)}</h2><span class="round">${r.finished ? "Finished" : `Round ${r.at + 1} of ${r.total}`}</span></a>
+    ${p.rounds.map((ids, i) => {
+      const games = ids.map(id => s.games[id]), on = new Set(games.flatMap(g => [...g.t1, ...g.t2])), sit = p.players.filter(x => !on.has(x));
+      return `<div class="drd ${i < r.at ? "past" : i === r.at ? "now" : ""}"><span class="drd-n" aria-label="Round ${i + 1}"><small>R</small>${i + 1}</span><div class="drd-g">
+        ${games.map((g, k) => {
+          const done = g.status === "done", w1 = done && g.s1 > g.s2, w2 = done && g.s2 > g.s1;
+          const court = `<span class="dc">${p.courts > 1 ? "C" : ""}${k + 1}</span>`;
+          return `<div class="dg${g.status === "skipped" ? " skip" : ""}">
+            <span class="dpair${w1 ? " w" : ""}">${teamLine(g.t1)}</span>${done ? `<span class="ds${w1 ? " w" : ""}">${g.s1}</span>` : court}
+            <span class="dpair${w2 ? " w" : ""}">${teamLine(g.t2)}</span>${done ? `<span class="ds${w2 ? " w" : ""}">${g.s2}</span>` : ""}</div>`;
+        }).join("")}
+        ${sit.length ? `<p class="dsit">Sitting out: ${namesList(sit)}</p>` : ""}</div></div>`;
+    }).join("")}</section>`;
 }
 /* One slot under a round's games: either how many scores are missing, or the confirm button. Same size either way. */
 function confirmBlock(s, pool, r, brief) {
@@ -145,9 +181,10 @@ function nextBox(pool, r, compact) {
   if (!r.next.length) return "";
   return `<section class="nextbox ${compact ? "compact" : ""}">
     <h2><span>Next round</span>${compact ? "" : `<span class="num">Round ${r.at + 2} of ${r.total}</span>`}</h2>
-    ${r.next.map((g, i) => `<div class="nx"><span class="nx-tag">${pool.courts > 1 ? "Court " + (i + 1) : i === 0 ? "First on court" : "Then"}</span>
-      ${compact ? `<div class="nx-lines"><b>${teamLine(g.t1)}</b><b><i>v</i> ${teamLine(g.t2)}</b></div>`
-        : `<div class="nx-teams"><div class="names">${team(g.t1)}</div><span class="v">v</span><div class="names r">${team(g.t2)}</div></div>`}</div>`).join("")}
+    ${r.next.map((g, i) => compact
+      ? `<div class="nx side-tag"><span class="nx-tag">${i + 1}</span><div class="nx-lines"><b>${teamLine(g.t1)}</b><b>${teamLine(g.t2)}</b></div></div>`
+      : `<div class="nx"><span class="nx-tag">${pool.courts > 1 ? "Court " + (i + 1) : i === 0 ? "First on court" : "Then"}</span>
+        <div class="nx-teams"><div class="names">${team(g.t1)}</div><span class="v">v</span><div class="names r">${team(g.t2)}</div></div></div>`).join("")}
     ${r.sittingNext.length ? `<p class="sit"><b>Sitting out</b> ${namesList(r.sittingNext)}</p>` : ""}</section>`;
 }
 /* Organiser only: step a pool back a round after a confirm made too early. */
@@ -156,7 +193,7 @@ function backBlock(s, pool, r) {
   const key = "back-" + pool.id;
   return app.confirm === key
     ? `<div class="row orgrow"><span class="muted">Go back to round ${r.at}? Scores are kept.</span><button class="btn small" data-act="backRound" data-sid="${s.id}" data-pool="${pool.id}">Yes, go back</button><button class="btn small" data-act="cancel">No</button></div>`
-    : `<div class="row orgrow"><button class="btn small" data-act="ask" data-key="${key}">Organiser: back to round ${r.at}</button></div>`;
+    : `<div class="row orgrow"><button class="btn small quiet" data-act="ask" data-key="${key}">‹ Back to round ${r.at}</button></div>`;
 }
 const namesList = ids => ids.map(sn).map(esc).join(", ");
 function standingsTable(s, pool) {
@@ -194,17 +231,8 @@ function viewHome() {
       ${pools.length ? `<div class="pools">${pools.map(p => `<div class="pool"><h2>${esc(p.name)}</h2><ol>${p.players.map((id, i) => `<li class="pl"><span class="rk">${i + 1}</span><span class="nm">${esc(nm(id))}</span><span class="rt">${fmt(rating(id))}</span></li>`).join("")}</ol></div>`).join("")}</div>` : ""}
       ${join}`;
   }
-  return `<div class="head"><h1>${niceDate(s.date)}</h1></div>
-    <div class="tiles">${s.pools.map(p => {
-      const r = roundInfo(s, p), waiting = r.games.filter(g => g.status === "pending");
-      return `<a class="tile ${r.finished ? "done" : ""}" href="#/court/${p.id}">
-        <span class="t-name">${esc(p.name)}</span>
-        <span class="t-sub">${r.finished ? "Finished" : `Round ${r.at + 1} of ${r.total}`} · ${r.done} of ${r.playable} games</span>
-        <span class="bar"><i style="width:${pct(r)}%"></i></span>
-        <span class="t-now">${r.finished ? "All rounds played" : waiting.length ? waiting.map(g => `<span>${teamLine(g.t1)}<br><i>v</i> ${teamLine(g.t2)}</span>`).join("") : "Scores are in. Waiting for the round to be confirmed."}</span>
-      </a>`;
-    }).join("")}</div>
-    <div class="row"><a class="btn" href="#/board">All courts on one screen</a><a class="btn" href="#/standings">Standings</a></div>${join}`;
+  return `<div class="dhead"><h1>${niceDate(s.date)}</h1><p class="muted">The full draw. Tap a pool to enter scores.</p></div>
+    <div class="draw" style="${fit(s)}">${s.pools.map(p => drawPool(s, p)).join("")}</div>${join}`;
 }
 
 /* ---------- Court ---------- */
@@ -228,14 +256,13 @@ function viewCourt(pid) {
 function viewBoard() {
   const s = openSess();
   if (!s || s.status !== "live") return `<div class="head"><h1>All courts</h1><p class="muted">No session is live. Current games appear here once the organiser starts one.</p></div>`;
-  return `<div class="head"><h1>All courts</h1></div>${errLine("court")}
-    <div class="board">${s.pools.map(p => {
+  return `${errLine("court")}
+    <div class="board" style="${fit(s)}">${s.pools.map(p => {
       const r = roundInfo(s, p);
       return `<div class="stack">
-        <div class="row spread"><h2><a href="#/court/${p.id}">${esc(p.name)}</a></h2><span class="round">${r.finished ? "Finished" : `Round ${r.at + 1} of ${r.total}`}</span></div>
-        <span class="bar on-surface"><i style="width:${pct(r)}%"></i></span>
-        ${r.finished ? '<div class="note">All rounds finished.</div>' : roundCards(s, p, r) + confirmBlock(s, p, r, true)}${backBlock(s, p, r)}
-        ${nextBox(p, r, true)}
+        <div class="row spread bhead"><h2><a href="#/court/${p.id}">${esc(p.name)}</a></h2><span class="round">${r.finished ? "Finished" : `Round ${r.at + 1} of ${r.total}`}</span></div>
+        ${r.finished ? '<div class="note">All rounds finished.</div>' : roundCards(s, p, r) + confirmBlock(s, p, r, true)}
+        ${nextBox(p, r, true)}${backBlock(s, p, r)}
       </div>`;
     }).join("")}</div>`;
 }
@@ -247,11 +274,13 @@ function viewStandings() {
   const tab = app.tab === "session" && shown ? "session" : "ratings";
   const lastRec = last ? app.st.ratings.sessions[last.id] || {} : {};
   const ids = Object.keys(app.st.players).sort((a, b) => rating(b) - rating(a) || nm(a).localeCompare(nm(b)));
-  const ratings = `<div class="card"><div class="scroll"><table>
+  const hist = tab === "ratings" ? ratingHistory() : null, charted = new Set(hist ? hist.series.map(x => x.id) : []);
+  const slot = Object.fromEntries((hist ? hlList(hist) : []).map(h => [h.id, h.slot]));
+  const ratings = `${hist ? ratingChart(hist) : ""}<div class="card"><div class="scroll"><table>
     <thead><tr><th>#</th><th>Player</th><th class="r">Rating</th><th class="r">Last week</th><th class="r">W-L</th></tr></thead>
     <tbody>${ids.map((id, i) => {
       const t = app.st.ratings.totals[id] || { w: 0, l: 0 }, rec = lastRec[id], ch = rec ? rec.end - rec.start : null;
-      return `<tr class="${P(id).active ? "" : "off"}"><td>${i + 1}</td><td>${esc(nm(id))}${P(id).active ? "" : "<small>dropped out</small>"}</td>
+      return `<tr class="${P(id).active ? "" : "off"}${charted.has(id) ? " pickable" : ""}" ${charted.has(id) ? `data-act="hl" data-pid="${id}"` : ""}><td>${i + 1}</td><td>${slot[id] ? `<i class="sw" style="background:var(--s${slot[id]})"></i>` : ""}${esc(nm(id))}${P(id).active ? "" : "<small>dropped out</small>"}</td>
         <td class="r"><b>${fmt(rating(id))}</b></td><td class="r">${ch === null ? '<span class="muted">did not play</span>' : `<span class="${ch < 0 ? "dn" : "up"}">${sgn(ch)}</span>`}</td><td class="r">${t.w}-${t.l}</td></tr>`;
     }).join("")}</tbody></table></div></div>
     <p class="muted">Ratings update when the organiser finishes a session. Every game in a session counts the same, whatever order it was played in.</p>`;
@@ -265,11 +294,103 @@ function viewStandings() {
     ${tab === "ratings" ? ratings : session}`;
 }
 
+/* ---------- Ratings chart ---------- */
+/* Rating after each finished session, per player. A missed week carries the rating forward. */
+function ratingHistory() {
+  const closed = closedSess(), recs = app.st.ratings.sessions;
+  const labels = ["Start"].concat(closed.map(s => new Date(s.date + "T00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" })));
+  const series = Object.keys(app.st.players).map(id => {
+    let v = P(id).seed, any = false;
+    const vals = [v], played = [false];
+    closed.forEach(s => { const r = (recs[s.id] || {})[id]; if (r) { v = r.end; any = true; } vals.push(v); played.push(!!r); });
+    return { id, vals, played, any };
+  }).filter(x => x.any);
+  return { labels, series };
+}
+/* Highlighted players. Until someone picks, the top three. A colour stays with its player while they are picked. */
+function hlList(hist) {
+  const ok = new Set(hist.series.map(x => x.id));
+  if (!app.hl) app.hl = hist.series.slice().sort((a, b) => b.vals[b.vals.length - 1] - a.vals[a.vals.length - 1]).slice(0, 3).map((x, i) => ({ id: x.id, slot: i + 1 }));
+  return app.hl.filter(h => ok.has(h.id));
+}
+function toggleHl(pid) {
+  const list = app.hl || [], at = list.findIndex(h => h.id === pid);
+  if (at >= 0) list.splice(at, 1);
+  else {
+    const gone = list.length >= 4 ? list.shift() : null;                    // a fifth pick takes over from the oldest
+    const used = new Set(list.map(h => h.slot));
+    list.push({ id: pid, slot: gone ? gone.slot : [1, 2, 3, 4].find(k => !used.has(k)) });
+  }
+  app.hl = list;
+  render();
+}
+function ratingChart(hist) {
+  const n = hist.labels.length;
+  if (n < 2 || !hist.series.length) return "";
+  const W = Math.max(280, Math.min(1400, document.documentElement.clientWidth) - 54), narrow = W < 560, H = narrow ? 300 : 380;
+  const m = { l: 40, r: narrow ? 112 : 132, t: 12, b: 28 };
+  const all = hist.series.flatMap(x => x.vals), lo = Math.floor((Math.min(...all) - 15) / 100) * 100, hi = Math.ceil((Math.max(...all) + 15) / 100) * 100;
+  const X = i => m.l + (W - m.l - m.r) * i / (n - 1), Y = v => m.t + (H - m.t - m.b) * (hi - v) / (hi - lo), f = v => v.toFixed(1);
+  const step = hi - lo > 900 ? 200 : 100, ticks = [];
+  for (let v = lo; v <= hi; v += step) ticks.push(v);
+  const picked = hlList(hist), slot = Object.fromEntries(picked.map(h => [h.id, h.slot]));
+  const path = x => x.vals.map((v, i) => `${i ? "L" : "M"}${f(X(i))} ${f(Y(v))}`).join("");
+  const byId = Object.fromEntries(hist.series.map(x => [x.id, x]));
+  /* direct labels at the line ends, pushed apart so they never overlap */
+  const ends = picked.map(h => ({ h, y: Y(byId[h.id].vals[n - 1]) })).sort((a, b) => a.y - b.y);
+  ends.forEach((e, i) => { e.ly = i ? Math.max(e.y, ends[i - 1].ly + 19) : e.y; });
+  for (let i = ends.length - 1; i >= 0; i--) { const cap = i === ends.length - 1 ? H - m.b : ends[i + 1].ly - 19; if (ends[i].ly > cap) ends[i].ly = cap; }
+  app.chart = { xs: hist.labels.map((_, i) => X(i)), lo, hi, top: m.t, bottom: H - m.b, hist };
+  return `<div class="card chartcard"><div class="row spread"><h2>Rating after each session</h2><span class="muted small">Tap a player or a line to highlight, up to four</span></div>
+    <div class="legend">${picked.length ? picked.map(h => `<button class="lg" data-act="hl" data-pid="${h.id}" aria-label="Remove ${esc(nm(h.id))}"><i class="sw" style="background:var(--s${h.slot})"></i>${esc(sn(h.id))}<b>${fmt(rating(h.id))}</b><span aria-hidden="true">✕</span></button>`).join("") : '<span class="muted">No player highlighted.</span>'}</div>
+    <div class="chartbox"><svg class="rchart" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Line chart of every player's rating after each session. The table below has the same numbers.">
+      ${ticks.map(v => `<line class="grid" x1="${m.l}" x2="${W - m.r}" y1="${f(Y(v))}" y2="${f(Y(v))}"/><text class="ax" x="${m.l - 8}" y="${f(Y(v) + 4)}" text-anchor="end">${(v / 1000).toFixed(1)}</text>`).join("")}
+      ${hist.labels.map((l, i) => `<text class="ax" x="${f(X(i))}" y="${H - 8}" text-anchor="${i === 0 ? "start" : "middle"}">${esc(l)}</text>`).join("")}
+      <line class="xh" x1="0" x2="0" y1="${m.t}" y2="${H - m.b}" visibility="hidden"/>
+      ${hist.series.filter(x => !slot[x.id]).map(x => `<path class="ln" d="${path(x)}"/>`).join("")}
+      ${picked.map(h => `<path class="ln on" style="stroke:var(--s${h.slot})" d="${path(byId[h.id])}"/>${byId[h.id].vals.map((v, i) => `<circle class="pt" style="fill:var(--s${h.slot})" cx="${f(X(i))}" cy="${f(Y(v))}" r="4.5"/>`).join("")}`).join("")}
+      ${ends.map(e => `${Math.abs(e.ly - e.y) > 3 ? `<line class="lead" x1="${f(X(n - 1) + 6)}" y1="${f(e.y)}" x2="${f(X(n - 1) + 11)}" y2="${f(e.ly)}"/>` : ""}<text class="el" x="${f(X(n - 1) + 14)}" y="${f(e.ly + 5)}">${esc(sn(e.h.id))} <tspan class="ev">${fmt(byId[e.h.id].vals[n - 1])}</tspan></text>`).join("")}
+    </svg><div class="tip" hidden></div></div></div>`;
+}
+/* Hover and tap on the chart: a crosshair at the nearest session, the highlighted players' ratings there, and the line under the pointer. */
+function chartProbe(e) {
+  const svg = e.target.closest ? e.target.closest(".rchart") : null, c = app.chart;
+  if (!svg || !c) return null;
+  const box = svg.getBoundingClientRect(), px = e.clientX - box.left, py = e.clientY - box.top, xs = c.xs, last = xs.length - 1;
+  if (px < xs[0] - 24 || px > xs[last] + 24 || py < c.top - 10 || py > c.bottom + 10) return null;
+  let i = 0;
+  xs.forEach((x, k) => { if (Math.abs(x - px) < Math.abs(xs[i] - px)) i = k; });
+  const k = Math.max(0, Math.min(last - 1, xs.findIndex((x, j) => j < last && px <= xs[j + 1]))), t = Math.max(0, Math.min(1, (px - xs[k]) / (xs[k + 1] - xs[k])));
+  const Y = v => c.top + (c.bottom - c.top) * (c.hi - v) / (c.hi - c.lo);
+  let near = null, best = 14;
+  for (const x of c.hist.series) { const d = Math.abs(Y(x.vals[k] + (x.vals[k + 1] - x.vals[k]) * t) - py); if (d < best) { best = d; near = x.id; } }
+  return { svg, i, near, px, py, width: box.width };
+}
+function chartTip(e) {
+  const p = chartProbe(e), old = $(".chartbox .tip");
+  if (!p) { if (old && !old.hidden) { old.hidden = true; $(".rchart .xh").setAttribute("visibility", "hidden"); } return; }
+  const c = app.chart, tip = $(".tip", p.svg.parentNode), xh = $(".xh", p.svg), slot = Object.fromEntries((app.hl || []).map(h => [h.id, h.slot]));
+  const ids = (app.hl || []).map(h => h.id).filter(id => c.hist.series.some(x => x.id === id));
+  if (p.near && !ids.includes(p.near)) ids.push(p.near);
+  const row = id => {
+    const x = c.hist.series.find(q => q.id === id), v = x.vals[p.i], ch = p.i ? (x.played[p.i] ? sgn(v - x.vals[p.i - 1]) : "did not play") : "seed";
+    return `<span class="tr"><i class="sw" style="background:${slot[id] ? `var(--s${slot[id]})` : "var(--line-2)"}"></i><span>${esc(sn(id))}</span><b>${fmt(v)}</b><em>${ch}</em></span>`;
+  };
+  ids.sort((a, b) => c.hist.series.find(q => q.id === b).vals[p.i] - c.hist.series.find(q => q.id === a).vals[p.i]);
+  tip.innerHTML = `<strong>${p.i ? "After " : ""}${esc(c.hist.labels[p.i])}</strong>${ids.map(row).join("") || '<span class="muted">Point at a line</span>'}`;
+  tip.hidden = false;
+  xh.setAttribute("x1", c.xs[p.i]); xh.setAttribute("x2", c.xs[p.i]); xh.setAttribute("visibility", "visible");
+  const left = p.px > p.width / 2;
+  tip.style.left = left ? "" : `${p.px + 14}px`; tip.style.right = left ? `${p.width - p.px + 14}px` : "";
+  tip.style.top = `${Math.max(0, p.py - 20)}px`;
+}
+
 /* ---------- Organiser ---------- */
 function viewOrg(sub, arg) {
   if (!isOrg()) return orgGate();
   const tabs = [["", "Session"], ["players", "Players"], ["history", "History"], ["settings", "Settings"]];
   const head = `<div class="row spread"><h1>Organiser</h1>${app.be.orgMode === "open" ? "" : `<button class="btn small" data-act="lock">${app.be.orgMode === "pin" ? "Lock" : "Sign out"}</button>`}</div>
+    ${app.be.orgMode === "open" && app.be.kind !== "local" ? '<p class="note"><b>No login for now.</b> Anyone with the link can use the organiser tools on this page. An organiser login can be added later.</p>' : ""}
     <div class="tabs">${tabs.map(([k, l]) => `<a class="btn small ${(sub || "") === k ? "primary" : ""}" href="#/org${k ? "/" + k : ""}">${l}</a>`).join("")}</div>`;
   const body = sub === "players" ? orgPlayers() : sub === "history" ? orgHistory(arg) : sub === "settings" ? orgSettings() : orgSession();
   return head + body;
@@ -435,9 +556,10 @@ function orgSettings() {
       <div class="row spread"><span><b>Names on match screens</b><br><span class="muted">Standings and the roster always show full names.</span></span>
         <span class="seg" role="group" aria-label="Names on match screens">${[["short", "First name + initial"], ["full", "Full names"]].map(([k, l]) => `<button type="button" data-act="nameStyle" data-style="${k}" aria-pressed="${(lg.nameStyle || "short") === k}">${l}</button>`).join("")}</span></div></form>
     <div class="card"><h2>Connecting</h2>
-      ${app.be.kind === "firebase" ? `<p>Everyone opens <b>${esc(location.origin + location.pathname)}</b>. Scores sync live between all phones and tablets.</p>`
+      ${app.be.kind === "firebase" ? `<p>Everyone opens <b>${esc(location.origin + location.pathname)}</b>. Scores sync live between all phones and tablets.</p>
+          ${app.be.orgMode === "open" ? '<p class="muted">Organiser login is switched off, so save a copy below before each session. The login can be switched back on later.</p>' : ""}`
         : app.be.kind === "server" ? `<p>${app.urls.length ? `Phones and tablets on the same Wi-Fi or hotspot open <b>${esc(app.urls[0])}</b>.` : "This computer has no network address right now. Connect it to Wi-Fi or a phone hotspot so other devices can join."}</p>
-          <p class="muted">The organiser PIN is stored in the file data/config.json on the computer running the league.</p>`
+          <p class="muted">${app.be.orgMode === "open" ? 'The organiser PIN is switched off. To require it again, set "open" to false in data/config.json on the computer running the league.' : "The organiser PIN is stored in the file data/config.json on the computer running the league."}</p>`
         : `<p>Single-device mode. Everything is saved in this browser only, so other phones cannot see it. Add the Firebase details to config.js to share it live.</p>`}
       <p class="muted">Starting seeds are ${lg.seeds.map(v => (v / 1000).toFixed(1)).join(", ")}.</p></div>
     <div class="card"><h2>League data</h2>
@@ -540,6 +662,7 @@ const A = {
   backRound: d => { app.confirm = null; return act("court", "round.back", { sid: d.sid, pool: d.pool }, "Back one round"); },
   nameStyle: d => act("league", "league.update", { nameStyle: d.style }),
   tab: d => { app.tab = d.tab; render(); },
+  hl: d => toggleHl(d.pid),
   lock: async () => { await app.be.signOut(); app.form.password = ""; render(); },
   export: () => {
     const a = document.createElement("a");
@@ -603,7 +726,10 @@ const FORMS = {
   league: () => act("league", "league.update", { name: app.form.lname ?? app.st.league.name, pointsToWin: app.form.lpts ?? app.st.league.pointsToWin }, "Saved"),
 };
 
+document.addEventListener("pointermove", chartTip);
 document.addEventListener("click", e => {
+  const p = chartProbe(e);
+  if (p) { if (p.near) toggleHl(p.near); else chartTip(e); return; }
   const el = e.target.closest("[data-act]");
   if (!el || el.disabled) return;
   const fn = A[el.dataset.act];
@@ -644,6 +770,8 @@ document.addEventListener("drop", e => {
   e.preventDefault(); app.sel = null;
   act("pools", "session.move", { sid: s.id, pid, to: z.dataset.drop });
 });
+let resizeTimer = 0;
+window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (!app.flow) render(); }, 150); });
 window.addEventListener("hashchange", () => { app.confirm = null; app.sel = null; app.edit = null; window.scrollTo(0, 0); render(); });
 
 boot();

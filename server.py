@@ -47,6 +47,7 @@ def lan_addresses(port):
 CONFIG = load_config()
 STORE = Store(DATA)
 PORT = int(os.environ.get("PORT", CONFIG.get("port", 8080)))
+OPEN = bool(CONFIG.get("open", True))   # organiser tools without the PIN; set "open": false in data/config.json to require it
 URLS = lan_addresses(PORT)
 
 
@@ -80,7 +81,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(204)
                 return self._json(200, self._state())
         if url.path == "/config.js":      # the local server never uses the hosted site's Firebase settings
-            return self._send(200, b"window.LADDER_CONFIG = { firebase: null };", "text/javascript; charset=utf-8")
+            body = "window.LADDER_CONFIG = { firebase: null, openOrganiser: %s };" % ("true" if OPEN else "false")
+            return self._send(200, body.encode("utf-8"), "text/javascript; charset=utf-8")
         rel = "index.html" if url.path in ("/", "") else url.path.lstrip("/")
         full = os.path.normpath(os.path.join(STATIC, rel))
         if not full.startswith(STATIC) or not os.path.isfile(full):
@@ -100,7 +102,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(413, dict(ok=False, code="large", message="Request too large."))
             body = json.loads(self.rfile.read(length) or b"{}")
             kind, args = str(body.get("type", "")), body.get("args") or {}
-            org = secrets.compare_digest(str(body.get("pin", "")), str(CONFIG["pin"]))
+            org = OPEN or secrets.compare_digest(str(body.get("pin", "")), str(CONFIG["pin"]))
         except (ValueError, TypeError):
             return self._json(400, dict(ok=False, code="bad", message="Bad request."))
         if kind == "auth.check":
@@ -122,7 +124,7 @@ def main():
     print("  On this computer:  http://localhost:%d" % PORT)
     for u in URLS:
         print("  On this network:   %s" % u)
-    print("  Organiser PIN:     see %s" % os.path.join(DATA, "config.json"))
+    print("  Organiser access:  %s" % ("open, no PIN" if OPEN else "PIN, see " + os.path.join(DATA, "config.json")))
     sys.stdout.flush()
     try:
         server.serve_forever()
