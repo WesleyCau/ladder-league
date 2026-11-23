@@ -158,10 +158,10 @@ function shell(body) {
   const kiosk = app.kiosk && route === "board";
   document.body.classList.toggle("kiosk", !!kiosk);
   return `
-  ${kiosk ? `<div class="kbar"><span>${esc(app.st.league.name)}</span><button data-act="fullscreen">Show menus ✕</button><span class="ktip">${isIOS() && !isHomeScreenApp() ? "True full screen: Share, Add to Home Screen" : ""}</span></div>` : ""}
   <header class="top"><div class="top-in">
     <div class="top-l"><div class="brand">${esc(app.st.league.name)}</div>${s && s.status === "live" ? '<span class="live-dot">Live</span>' : ""}</div>
-    <div class="top-c">${route === "board" ? `<button class="fsbtn" data-act="fullscreen">${fsOn() ? "Exit full screen" : "Full screen"}</button>` : ""}</div>
+    <div class="top-c">${route === "board" ? `<button class="fsbtn" data-act="fullscreen">${fsOn() || kiosk ? "Exit full screen" : "Full screen"}</button>` : ""}</div>
+    ${kiosk && isIOS() && !isHomeScreenApp() ? '<span class="ktip">For no Safari bars: Share, Add to Home Screen</span>' : ""}
     <nav class="nav" aria-label="Main">
       ${link("#/", "", "●", "Tonight")}${link("#/board", "board", "▦", "All courts")}${link("#/standings", "standings", "≡", "Standings")}${link("#/org", "org", "⚙", "Organiser")}
     </nav>
@@ -183,7 +183,7 @@ function matchCard(s, g, opts = {}) {
 }
 /* All courts card. Names on the left, "vs Court 1" on the bar between the pairs, the score column on the right.
    Until there is a score that column is the Enter score button; afterwards it shows the two scores with Edit between them. */
-function boardCard(s, g, label) {
+function boardCard(s, g, label, confirm) {
   const done = g.status === "done", skipped = g.status === "skipped", w1 = done && g.s1 > g.s2, w2 = done && g.s2 > g.s1;
   const go = `data-act="flow" data-sid="${s.id}" data-gid="${g.id}"`, where = label ? label + ": " : "";
   const names = (ids, won, row) => `<div class="names r${row}${done ? (won ? " won" : " lost") : ""}">${team(ids)}</div>`;
@@ -191,7 +191,8 @@ function boardCard(s, g, label) {
     : skipped ? `<div class="enter off"><b>Not<br>played</b></div>`
     : `<button class="enter" ${go} aria-label="${where}enter score"><b>Enter<br>score</b></button>`;
   return `<div class="bmatch ${done ? "is-done" : skipped ? "is-skipped" : "is-live"}">${names(g.t1, w1, 1)}
-    <div class="mid"><span class="vsl"><i>vs</i>${label ? `<b>${label}</b>` : ""}</span></div>${names(g.t2, w2, 3)}${right}</div>`;
+    ${confirm ? `<div class="mid go"><button class="confirmbtn" data-act="confirmRound" data-sid="${s.id}" data-pool="${confirm.pool}" data-round="${confirm.round}">Confirm round ${confirm.round + 1}<i aria-hidden="true">›</i></button></div>`
+      : `<div class="mid"><span class="vsl"><i>vs</i>${label ? `<b>${label}</b>` : ""}</span></div>`}${names(g.t2, w2, 3)}${right}</div>`;
 }
 /* Width of the widest name as the board draws it, in ems, measured in the page so it follows the stylesheet. */
 function boardNameEm(names) {
@@ -211,7 +212,7 @@ function roundCards(s, pool, r, board) {
   let waiting = 0;
   return r.games.map((g, i) => {
     const label = pool.courts > 1 ? `Court ${i + 1}` : g.status !== "pending" ? "" : waiting++ === 0 ? "Now" : "Next";
-    return board ? boardCard(s, g, label) : matchCard(s, g, { label });
+    return board ? boardCard(s, g, label, r.ready && !r.finished ? { pool: pool.id, round: r.at } : null) : matchCard(s, g, { label });
   }).join("");
 }
 /* Type sizes for the wide screens (board and draw) that keep every name and every pair on one line, whatever the names are. */
@@ -346,7 +347,7 @@ function viewBoard() {
       const r = roundInfo(s, p);
       return `<div class="stack">
         <div class="row spread bhead"><h2><a href="#/court/${p.id}">${esc(p.name)}</a></h2><span class="round">${r.finished ? "Finished" : `Round ${r.at + 1} of ${r.total}`}</span></div>
-        ${r.finished ? '<div class="note">All rounds finished.</div>' : roundCards(s, p, r, true) + (r.sitting.length ? `<p class="sit now"><b>Sitting out now</b> ${namesList(r.sitting)}</p>` : "") + confirmBlock(s, p, r, true)}
+        ${r.finished ? '<div class="note">All rounds finished.</div>' : roundCards(s, p, r, true) + (r.sitting.length ? `<p class="sit now"><b>Sitting out now</b> ${namesList(r.sitting)}</p>` : "")}
         ${r.missed ? `<a class="note warn" href="#/court/${p.id}">⚠ ${r.missed === 1 ? "1 earlier game has" : r.missed + " earlier games have"} no score. Tap to enter.</a>` : ""}
         ${nextBox(p, r, true)}${backBlock(s, p, r)}
       </div>`;
