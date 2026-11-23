@@ -128,9 +128,23 @@ function matchCard(s, g, opts = {}) {
   return `<div class="match ${done ? "is-done" : skipped ? "is-skipped" : opts.preview ? "is-preview" : "is-live"}">
     ${side(g.t1, g.s1, g.s1 > g.s2)}${side(g.t2, g.s2, g.s2 > g.s1)}${button}</div>`;
 }
-function roundCards(s, pool, r) {
+/* All courts: names on the left; the score column on the right is the Enter score button until the game has a score. */
+function boardCard(s, g, label) {
+  const done = g.status === "done", skipped = g.status === "skipped", w1 = done && g.s1 > g.s2, w2 = done && g.s2 > g.s1;
+  const tag = label ? `<span class="ct">${label}</span>` : "", go = `data-act="flow" data-sid="${s.id}" data-gid="${g.id}"`;
+  const names = (ids, won, row) => `<div class="names r${row}${done ? (won ? " won" : " lost") : ""}">${team(ids)}</div>`;
+  const right = done ? `<div class="pts r1 ${w1 ? "won" : "lost"}">${g.s1}</div><div class="pts r3 ${w2 ? "won" : "lost"}">${g.s2}</div>`
+    : skipped ? `<div class="enter off">${tag}<b>Not<br>played</b></div>`
+    : `<button class="enter" ${go} aria-label="${label ? label + ": " : ""}enter score">${tag}<b>Enter<br>score</b></button>`;
+  return `<div class="bmatch ${done ? "is-done" : skipped ? "is-skipped" : "is-live"}">${names(g.t1, w1, 1)}
+    <div class="mid">${done ? `<button class="editbtn" ${go}>${tag}<span>Edit score</span></button>` : ""}</div>${names(g.t2, w2, 3)}${right}</div>`;
+}
+function roundCards(s, pool, r, board) {
   let waiting = 0;
-  return r.games.map((g, i) => matchCard(s, g, { label: pool.courts > 1 ? `Court ${i + 1}` : g.status !== "pending" ? "" : waiting++ === 0 ? "Now" : "Next" })).join("");
+  return r.games.map((g, i) => {
+    const label = pool.courts > 1 ? `Court ${i + 1}` : g.status !== "pending" ? "" : waiting++ === 0 ? "Now" : "Next";
+    return board ? boardCard(s, g, label) : matchCard(s, g, { label });
+  }).join("");
 }
 /* Type sizes for the wide screens (board and draw) that keep every name and every pair on one line, whatever the names are. */
 const emCache = new Map();
@@ -149,8 +163,9 @@ function fit(s) {
   const col = (Math.min(1400, vw) - 24 - 10 * (n - 1)) / n, cap = (lo, v, hi) => Math.max(lo, Math.min(hi, Math.floor(v * 10) / 10));
   const names = s.pools.flatMap(p => p.players).map(sn), pairs = Object.values(s.games).flatMap(g => [g.t1, g.t2]).map(t => t.map(sn).join(" / "));
   const name = Math.max(...names.map(x => emWidth(x, 800))), pair = Math.max(...pairs.map(x => emWidth(x, 700)));
-  const pts = Math.min(62, Math.max(44, vw * 0.048)) * 1.15;
-  return `--n:${n};--fit-name:${cap(16, (col - 30 - pts) / name, 34)}px;--fit-pair:${cap(13, (col - 42) / pair, 23)}px;--fit-draw:${cap(12, (col - 68) / pair, 18)}px`;
+  const pts = Math.min(76, Math.max(54, vw * 0.055));      // the score column, the same clamp as --ptsw in the stylesheet
+  const colB = (Math.min(1400, vw) - 12 - 6 * (n - 1)) / n;      // the board runs closer to the screen edge, with tighter gaps
+  return `--n:${n};--fit-name:${cap(16, (colB - 22 - pts) / name, 44)}px;--fit-pair:${cap(13, (colB - 36) / pair, 24)}px;--fit-draw:${cap(12, (col - 68) / pair, 18)}px`;
 }
 /* Tonight: one pool's whole draw. Every round, both courts, scores as they come in. */
 function drawPool(s, p) {
@@ -262,7 +277,7 @@ function viewBoard() {
       const r = roundInfo(s, p);
       return `<div class="stack">
         <div class="row spread bhead"><h2><a href="#/court/${p.id}">${esc(p.name)}</a></h2><span class="round">${r.finished ? "Finished" : `Round ${r.at + 1} of ${r.total}`}</span></div>
-        ${r.finished ? '<div class="note">All rounds finished.</div>' : roundCards(s, p, r) + confirmBlock(s, p, r, true)}
+        ${r.finished ? '<div class="note">All rounds finished.</div>' : roundCards(s, p, r, true) + confirmBlock(s, p, r, true)}
         ${nextBox(p, r, true)}${backBlock(s, p, r)}
       </div>`;
     }).join("")}</div>`;
@@ -352,16 +367,20 @@ function currentPools() {
 const MAX_COLOURS = 16;
 const slotColour = k => (k ? `var(--c${(k - 1) % 8 + 1})` : "var(--line-2)");
 const swatch = h => `<i class="lsw${h && h.slot > 8 ? " dash" : ""}" ${h ? `style="--k:${slotColour(h.slot)}"` : ""}></i>`;
-/* Players matching both pool filters, best rating first, coloured in that order. */
-function selFor(hist, start, now) {
-  const cur = currentPools();
-  return hist.series.filter(x => (start === "all" || seedLevel(x.id) === +start) && (now === "all" || cur[x.id] === +now))
-    .sort((a, b) => rating(b.id) - rating(a.id)).map((x, i) => ({ id: x.id, slot: i < MAX_COLOURS ? i + 1 : 0 }));
+/* Players matching both pool filters, best rating first. An empty filter means any pool.
+   Players who were already on keep their colour; newcomers take the free ones. */
+function selFor(hist, starts, nows, prev) {
+  const cur = currentPools(), keep = Object.fromEntries((prev || []).map(h => [h.id, h.slot]));
+  const ids = hist.series.filter(x => (!starts.length || starts.includes(seedLevel(x.id))) && (!nows.length || nows.includes(cur[x.id])))
+    .sort((a, b) => rating(b.id) - rating(a.id)).map(x => x.id);
+  const used = new Set(ids.map(id => keep[id]).filter(Boolean));
+  const next = () => { for (let k = 1; k <= MAX_COLOURS; k++) if (!used.has(k)) { used.add(k); return k; } return 0; };
+  return ids.map(id => ({ id, slot: keep[id] || 0 })).map(h => (h.slot ? h : { id: h.id, slot: next() }));
 }
 /* The players switched on. Until someone chooses, whoever is in Pool A now. */
 function selection(hist) {
-  if (!app.hs) { const cur = currentPools(); app.hs = { start: "all", now: hist.series.some(x => cur[x.id] === 0) ? 0 : "all", on: null }; }
-  if (!app.hs.on) app.hs.on = selFor(hist, app.hs.start, app.hs.now);
+  if (!app.hs) { const cur = currentPools(); app.hs = { start: [], now: hist.series.some(x => cur[x.id] === 0) ? [0] : [], custom: false, on: null }; }
+  if (!app.hs.on) { app.hs.on = selFor(hist, app.hs.start, app.hs.now, app.hs.prev); app.hs.prev = null; }
   const ok = new Set(hist.series.map(x => x.id));
   return app.hs.on.filter(h => ok.has(h.id));
 }
@@ -371,7 +390,7 @@ function togglePlayer(pid, onlyOn) {
   const free = () => { const used = new Set(on.map(h => h.slot)); for (let k = 1; k <= MAX_COLOURS; k++) if (!used.has(k)) return k; return 0; };
   if (at < 0) on.push({ id: pid, slot: free() });
   else if (!onlyOn) { on.splice(at, 1); const grey = on.find(h => !h.slot); if (grey) grey.slot = free(); }
-  app.hs = Object.assign(app.hs || { start: null, now: null }, { on });
+  app.hs = Object.assign(app.hs || { start: [], now: [], custom: true }, { on });
   render();
 }
 function historyView(hist) {
@@ -384,7 +403,8 @@ function historyView(hist) {
   const cur = currentPools(), letter = k => (k == null ? "–" : String.fromCharCode(65 + k)), cs = currentSession();
   const when = cs ? (cs.status === "closed" ? new Date(cs.date + "T00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" }) : "tonight") : "", nowLabel = cs && cs.status !== "closed" ? "Pool tonight" : `Pool on ${when}`;
   const starts = [...new Set(hist.series.map(x => seedLevel(x.id)))].sort(), nows = [...new Set(hist.series.map(x => cur[x.id]).filter(k => k != null))].sort();
-  const seg = (kind, label, opts, val) => `<span class="row fl"><span class="muted small">${label}</span><span class="seg slim" role="group" aria-label="${label}">${[["all", "Any"]].concat(opts.map(k => [k, letter(k)])).map(([k, l]) => `<button data-act="hfilter" data-kind="${kind}" data-v="${k}" aria-pressed="${val !== null && String(val) === String(k)}">${l}</button>`).join("")}</span></span>`;
+  const seg = (kind, label, opts, vals) => `<span class="row fl"><span class="muted small">${label}</span><span class="seg slim multi" role="group" aria-label="${label}">
+    <button data-act="hfilter" data-kind="${kind}" data-v="all" aria-pressed="${!app.hs.custom && !vals.length}">Any</button>${opts.map(k => `<button data-act="hfilter" data-kind="${kind}" data-v="${k}" aria-pressed="${!app.hs.custom && vals.includes(k)}">${letter(k)}</button>`).join("")}</span></span>`;
   const ranked = hist.series.slice().sort((a, b) => rating(b.id) - rating(a.id) || nm(a.id).localeCompare(nm(b.id)));
   const shown = on.slice().sort((a, b) => rating(b.id) - rating(a.id)), greys = on.filter(h => !h.slot).length;
   return `<div class="kpis">
@@ -397,7 +417,7 @@ function historyView(hist) {
     <div class="card chartcard"><div class="row spread"><h2>Rating after each session</h2>
         <span class="row filters">${seg("start", "Started in pool", starts, app.hs.start)}${seg("now", nowLabel, nows, app.hs.now)}</span></div>
       ${ratingChart(hist, shown)}
-      <p class="muted small">A coloured line is a session played. A grey dotted line is a week missed, where the rating carries over. The two pool filters work together.${greys ? ` Only ${MAX_COLOURS} players can have a colour: the other ${greys} are plain grey.` : ""}</p>
+      <p class="muted small">A coloured line is a session played. A grey dotted line is a week missed, where the rating carries over. Switch on any mix of pools in each filter: a player shows when they match both.${greys ? ` Only ${MAX_COLOURS} players can have a colour: the other ${greys} are plain grey.` : ""}</p>
       <div class="row spread"><h3>Players <span class="muted num">${on.length} of ${hist.series.length} shown</span></h3>
         <span class="row"><button class="btn small" data-act="hall" data-on="1">All on</button><button class="btn small" data-act="hall" data-on="">All off</button></span></div>
       <p class="muted small">Tap a player to switch their line on or off. B › A means started in Pool B and played in Pool A ${cs && cs.status !== "closed" ? "tonight" : "on " + when}. A dash means they were not there.</p>
@@ -536,6 +556,21 @@ function orgSession() {
   return s.status === "setup" ? orgSetup(s) : orgLive(s);
 }
 
+/* Players who break the rating order between pools: the fewest who would have to move for every pool to outrank the one below it. */
+function outOfOrder(s) {
+  const seq = s.pools.flatMap((p, k) => p.players.slice().sort((a, b) => rating(b) - rating(a)).map(id => ({ id, k, r: rating(id) })));
+  const n = seq.length, len = new Array(n).fill(1), prev = new Array(n).fill(-1);
+  let best = -1;
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < i; j++) if (seq[j].r >= seq[i].r && len[j] + 1 > len[i]) { len[i] = len[j] + 1; prev[i] = j; }
+    if (best < 0 || len[i] > len[best]) best = i;
+  }
+  const keep = new Set();
+  for (let i = best; i >= 0; i = prev[i]) keep.add(seq[i].id);
+  /* high: someone in a lower pool is rated above them, so they sit higher than their rating says */
+  return seq.filter(x => !keep.has(x.id)).map(x => ({ id: x.id, pool: s.pools[x.k], high: seq.some(y => y.k > x.k && y.r > x.r) }));
+}
+
 function orgSetup(s) {
   const q = (app.form.q || "").toLowerCase();
   const active = Object.values(app.st.players).filter(p => p.active).sort((a, b) => a.name.localeCompare(b.name));
@@ -543,7 +578,8 @@ function orgSetup(s) {
   const loose = s.attending.filter(p => !placed.has(p));
   const sel = app.sel && inSet.has(app.sel) ? app.sel : null;
   const games = n => (n >= 4 && n <= 12 ? null : "needs 4 to 12 players");
-  const pl = (id, i) => `<li><button class="pl" draggable="true" data-act="pick" data-pid="${id}" aria-pressed="${sel === id}"><span class="rk">${i === null ? "" : i + 1}</span><span class="nm">${esc(nm(id))}</span><span class="rt">${fmt(rating(id))}</span></button></li>`;
+  const odd = Object.fromEntries(outOfOrder(s).map(o => [o.id, o])), oddN = Object.keys(odd).length;
+  const pl = (id, i) => `<li><button class="pl${odd[id] ? " out" : ""}" data-drag data-act="pick" data-pid="${id}" aria-pressed="${sel === id}"><span class="rk">${i === null ? "" : i + 1}</span><span class="nm">${esc(nm(id))}${odd[id] ? `<small>⚠ ${odd[id].high ? "higher" : "lower"} than their rating</small>` : ""}</span><span class="rt">${fmt(rating(id))}</span></button></li>`;
   return `
   <div class="row spread"><h2>${niceDate(s.date)}</h2>
     ${app.confirm === "delete" ? `<span class="row"><button class="btn small danger" data-act="delete" data-sid="${s.id}">Yes, delete it</button><button class="btn small" data-act="cancel">Keep</button></span>` : `<button class="btn small" data-act="ask" data-key="delete">Delete session</button>`}</div>
@@ -561,7 +597,8 @@ function orgSetup(s) {
   <div class="card"><div class="row spread"><h2>2. Pools</h2>
       <span class="row">${s.pools.length ? `<button class="btn small" data-act="assign" data-sid="${s.id}" data-pools="${Math.max(1, s.pools.length - 1)}" aria-label="One pool fewer">−</button><span class="num">${s.pools.length} pools</span><button class="btn small" data-act="assign" data-sid="${s.id}" data-pools="${s.pools.length + 1}" aria-label="One pool more">+</button>` : ""}
       <button class="btn ${s.pools.length ? "small" : "primary"}" data-act="assign" data-sid="${s.id}">${s.pools.length ? "Re-assign by rating" : "Assign pools by rating"}</button></span></div>
-    <p class="muted">${s.pools.length ? "Tap a player, then choose where to move them. Dragging works too." : "Players are ranked by rating and split into pools of about eight. You can move anyone afterwards."}</p>
+    <p class="muted">${s.pools.length ? "Drag a player to another pool (on a touch screen, press and hold first), or tap them and choose where to move them." : "Players are ranked by rating and split into pools of about eight. You can move anyone afterwards."}</p>
+    ${oddN ? `<p class="note warn">⚠ <b>${oddN === 1 ? "1 player is" : oddN + " players are"} out of rating order</b>, shown in yellow. You can still start: you will be asked to confirm.</p>` : ""}
     ${loose.length ? `<div class="pool warn" data-drop="none"><h3>Not in a pool yet (${loose.length})</h3><ol>${loose.map(id => pl(id, null)).join("")}</ol></div>` : ""}
     <div class="pools">${s.pools.map(p => {
       const n = p.players.length, bad = games(n);
@@ -716,9 +753,20 @@ function viewFlow() {
     <div class="flow-body">${body}${f.err ? `<p class="err" role="alert">${esc(f.err)}</p>` : ""}</div></div>`;
 }
 
-/* ---------- confirmation screen ---------- */
+/* ---------- confirmation screens ---------- */
 function viewDialog() {
   const d = app.dialog, s = sessById(d.sid);
+  if (d.kind === "start") {
+    const odd = s && s.status === "setup" ? outOfOrder(s) : [];
+    if (!odd.length) { app.dialog = null; return ""; }
+    return `<div class="flow" role="dialog" aria-modal="true" aria-label="Start session">
+      <div class="flow-top"><span></span><span class="where">${niceDate(s.date)}</span><button class="xbtn" data-act="cancel" aria-label="Close">✕</button></div>
+      <div class="flow-body"><h2>Start with ${odd.length === 1 ? "1 player" : odd.length + " players"} out of rating order?</h2>
+        <p class="lead">The pools were changed by hand, so ${odd.length === 1 ? "this player no longer lines" : "these players no longer line"} up with the ratings.</p>
+        <div class="oddlist">${odd.map(o => `<div class="odd"><b>${esc(nm(o.id))}</b><span class="num">${fmt(rating(o.id))}</span><span>${esc(o.pool.name)}, ${o.high ? "higher" : "lower"} than their rating</span></div>`).join("")}</div>
+        <button class="btn huge primary" data-act="start" data-sid="${s.id}" data-force="1">Yes, start the session</button>
+        <button class="btn huge" data-act="cancel">Go back to the pools</button></div></div>`;
+  }
   if (!s || s.status !== "live") { app.dialog = null; return ""; }
   const done = Object.values(s.games).filter(g => g.status === "done").length, moved = s.pools.filter(p => p.confirmed > 0).length;
   return `<div class="flow" role="dialog" aria-modal="true" aria-label="Reset session">
@@ -780,9 +828,15 @@ const A = {
   tab: d => { app.tab = d.tab; render(); },
   hl: d => togglePlayer(d.pid),
   hon: d => togglePlayer(d.pid, true),
-  history: d => { app.hs = { start: null, now: null, on: [{ id: d.pid, slot: 1 }] }; app.tab = "history"; render(); window.scrollTo(0, 0); },
-  hfilter: d => { const hs = app.hs || { start: "all", now: "all" }; hs[d.kind] = d.v === "all" ? "all" : +d.v; if (hs.start === null) hs.start = "all"; if (hs.now === null) hs.now = "all"; hs.on = null; app.hs = hs; render(); },
-  hall: d => { const hs = app.hs || {}; hs.start = hs.now = d.on ? "all" : null; hs.on = d.on ? null : []; app.hs = hs; render(); },
+  history: d => { app.hs = { start: [], now: [], custom: true, on: [{ id: d.pid, slot: 1 }] }; app.tab = "history"; render(); window.scrollTo(0, 0); },
+  hfilter: d => {
+    const hs = app.hs; if (!hs) return;
+    if (hs.custom) { hs.start = []; hs.now = []; hs.custom = false; }
+    if (d.v === "all") hs[d.kind] = [];
+    else { const k = +d.v, at = hs[d.kind].indexOf(k); if (at >= 0) hs[d.kind].splice(at, 1); else hs[d.kind].push(k); }
+    hs.prev = hs.on; hs.on = null; render();
+  },
+  hall: d => { const hs = app.hs; if (!hs) return; hs.start = []; hs.now = []; hs.custom = !d.on; hs.prev = d.on ? hs.on : null; hs.on = d.on ? null : []; render(); },
   askReset: d => { app.dialog = { sid: d.sid, busy: false, err: "" }; render(); },
   reset: async d => {
     const g = app.dialog; if (!g || g.busy) return;
@@ -814,7 +868,13 @@ const A = {
   pick: d => { app.sel = app.sel === d.pid ? null : d.pid; render(); },
   move: d => { app.sel = null; return act("pools", "session.move", { sid: d.sid, pid: d.pid, to: d.to }); },
   courts: d => act("pools", "session.pool", { sid: d.sid, pool: d.pool, courts: +d.courts }),
-  start: async d => { const j = await act("start", "session.start", { sid: d.sid }, "Session started"); if (j.ok) location.hash = "#/board"; },
+  start: async d => {
+    const s = sessById(d.sid);
+    if (!d.force && s && s.status === "setup" && outOfOrder(s).length) { app.dialog = { kind: "start", sid: d.sid }; return render(); }
+    app.dialog = null;
+    const j = await act("start", "session.start", { sid: d.sid }, "Session started");
+    if (j.ok) location.hash = "#/board";
+  },
   unstart: d => act("live", "session.unstart", { sid: d.sid }),
   delete: d => { app.confirm = null; return act("session", "session.delete", { sid: d.sid }, "Session deleted"); },
   close: async d => { app.confirm = null; const j = await act("live", "session.close", { sid: d.sid }, "Session finished. Ratings updated."); if (j.ok) { app.tab = "ratings"; location.hash = "#/standings"; } },
@@ -856,6 +916,7 @@ const FORMS = {
 
 document.addEventListener("pointermove", chartTip);
 document.addEventListener("click", e => {
+  if (drag.suppress) { e.preventDefault(); return; }
   const p = chartProbe(e);
   if (p) { chartTip(e); return; }
   const el = e.target.closest("[data-act]");
@@ -889,15 +950,57 @@ document.addEventListener("change", async e => {
   if (e.target.id) app.form[e.target.id] = e.target.value;
 });
 document.addEventListener("keydown", e => { if (e.key === "Escape" && (app.flow || app.dialog)) { app.flow = null; app.dialog = null; render(); } });
-document.addEventListener("dragstart", e => { const el = e.target.closest("[data-pid][draggable]"); if (el) { e.dataTransfer.setData("text/plain", el.dataset.pid); e.dataTransfer.effectAllowed = "move"; } });
-document.addEventListener("dragover", e => { const z = e.target.closest("[data-drop]"); if (z) { e.preventDefault(); z.classList.add("drop"); } });
-document.addEventListener("dragleave", e => { const z = e.target.closest("[data-drop]"); if (z && !z.contains(e.relatedTarget)) z.classList.remove("drop"); });
-document.addEventListener("drop", e => {
-  const z = e.target.closest("[data-drop]"), pid = e.dataTransfer.getData("text/plain"), s = openSess();
-  if (!z || !pid || !s) return;
-  e.preventDefault(); app.sel = null;
-  act("pools", "session.move", { sid: s.id, pid, to: z.dataset.drop });
+/* ---------- drag a player between pools: mouse straight away, touch after a press and hold ---------- */
+const drag = { pid: null, x: 0, y: 0, active: false, touch: false, timer: 0, ghost: null, zone: null, suppress: false };
+function dragBegin() {
+  drag.active = true;
+  drag.ghost = document.createElement("div");
+  drag.ghost.className = "dragghost";
+  drag.ghost.textContent = nm(drag.pid);
+  document.body.appendChild(drag.ghost);
+  document.body.classList.add("dragging");
+  dragTo(drag.x, drag.y);
+}
+function dragTo(x, y) {
+  drag.x = x; drag.y = y;
+  drag.ghost.style.transform = `translate(${x + 14}px, ${y - 22}px)`;
+  const el = document.elementFromPoint(x, y), zone = el && el.closest("[data-drop]");
+  document.querySelectorAll(".pool.drop").forEach(z => { if (z !== zone) z.classList.remove("drop"); });
+  if (zone) zone.classList.add("drop");
+  drag.zone = zone ? zone.dataset.drop : null;
+}
+function dragStop(drop) {
+  clearTimeout(drag.timer);
+  if (drag.active) {
+    drag.ghost.remove(); drag.ghost = null;
+    document.body.classList.remove("dragging");
+    document.querySelectorAll(".pool.drop").forEach(z => z.classList.remove("drop"));
+    const s = openSess();
+    if (drop && drag.zone !== null && s && s.status === "setup") { app.sel = null; act("pools", "session.move", { sid: s.id, pid: drag.pid, to: drag.zone }); }
+    drag.suppress = true; setTimeout(() => { drag.suppress = false; }, 80);       // the click that follows a drop is not a tap
+  }
+  drag.pid = null; drag.active = false;
+}
+document.addEventListener("pointerdown", e => {
+  const el = e.target.closest ? e.target.closest(".pl[data-drag]") : null;
+  if (!el || e.button > 0 || drag.pid) return;
+  drag.pid = el.dataset.pid; drag.x = e.clientX; drag.y = e.clientY; drag.touch = e.pointerType !== "mouse";
+  if (drag.touch) drag.timer = setTimeout(dragBegin, 350);
 });
+document.addEventListener("pointermove", e => {
+  if (!drag.pid) return;
+  if (!drag.active) {
+    const far = Math.hypot(e.clientX - drag.x, e.clientY - drag.y);
+    if (drag.touch) { if (far > 10) dragStop(false); return; }                   // a moving finger is a scroll, not a drag
+    if (far < 6) return;
+    dragBegin();
+  }
+  dragTo(e.clientX, e.clientY);
+});
+document.addEventListener("pointerup", () => { if (drag.pid) dragStop(true); });
+document.addEventListener("pointercancel", () => { if (drag.pid) dragStop(false); });
+document.addEventListener("touchmove", e => { if (drag.active) e.preventDefault(); }, { passive: false });
+document.addEventListener("contextmenu", e => { if (drag.pid && drag.touch) e.preventDefault(); });
 let resizeTimer = 0;
 window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (!app.flow) render(); }, 150); });
 window.addEventListener("hashchange", () => { app.dialog = null; app.confirm = null; app.sel = null; app.edit = null; window.scrollTo(0, 0); render(); });
