@@ -742,7 +742,7 @@ function orgSetup(s) {
   const sizes = s.pools.map(p => p.players.length), att = s.attending.length, minP = Math.max(1, Math.ceil(att / Ladder.MAX_POOL)), maxP = Math.max(1, Math.floor(att / Ladder.MIN_POOL));
   const odd = Object.fromEntries(outOfOrder(s).map(o => [o.id, o])), oddN = Object.keys(odd).length;
   const hand = s.pools.length > 0 && (oddN > 0 || Math.max(...sizes) - Math.min(...sizes) > 1);      // pools no longer look like a fresh assignment
-  const pl = (id, i) => `<li><button class="pl${odd[id] ? " out" : ""}" data-drag data-act="pick" data-pid="${id}" aria-pressed="${sel === id}"><span class="rk">${i === null ? "" : i + 1}</span><span class="nm">${esc(nm(id))}${odd[id] ? `<small>⚠ ${odd[id].high ? "higher" : "lower"} than their rating</small>` : ""}</span><span class="rt">${fmt(rating(id))}</span></button></li>`;
+  const pl = (id, i) => `<li><button class="pl${odd[id] ? " out" : ""}" data-drag data-act="pick" data-pid="${id}" aria-pressed="${sel === id}"><span class="rk">${i === null ? "" : i + 1}</span><span class="nm">${esc(nm(id))}${odd[id] ? `<small>⚠ ${odd[id].high ? "higher" : "lower"} than their rating</small>` : ""}</span><span class="rt">${fmt(rating(id))}</span><span class="grip" data-grip aria-hidden="true">⠿</span></button></li>`;
   return `
   <div class="row spread"><h2>${niceDate(s.date)}</h2>
     ${app.confirm === "delete" ? `<span class="row"><button class="btn small danger" data-act="delete" data-sid="${s.id}">Yes, delete it</button><button class="btn small" data-act="cancel">Keep</button></span>` : `<button class="btn small" data-act="ask" data-key="delete">Delete session</button>`}</div>
@@ -762,7 +762,7 @@ function orgSetup(s) {
       <button class="btn ${s.pools.length ? "small" : "primary"}" data-act="${hand ? "ask" : "assign"}" data-key="assign:" data-sid="${s.id}">${s.pools.length ? "Re-assign by rating" : "Assign pools by rating"}</button></span></div>
     ${(app.confirm || "").startsWith("assign:") ? `<div class="note warn"><b>Re-assigning puts everyone back in rating order</b> and drops the changes made by hand.
       <div class="row" style="margin-top:8px"><button class="btn small primary" data-act="assign" data-sid="${s.id}" data-pools="${esc(app.confirm.slice(7))}">Yes, re-assign</button><button class="btn small" data-act="cancel">Keep my changes</button></div></div>` : ""}
-    <p class="muted">${s.pools.length ? "Drag a player to another pool (on a touch screen, press and hold first), or tap them and choose where to move them." : "Players are ranked by rating and split into pools of about eight. You can move anyone afterwards."}</p>
+    <p class="muted">${s.pools.length ? "Drag a player to another pool. On a touch screen, drag by the ⠿ handle on the right of their row. Or tap a player and choose where to move them." : "Players are ranked by rating and split into pools of about eight. You can move anyone afterwards."}</p>
     ${oddN ? `<p class="note warn">⚠ <b>${oddN === 1 ? "1 player is" : oddN + " players are"} out of rating order</b>, shown in yellow. You can still start: you will be asked to confirm.</p>` : ""}
     ${loose.length ? `<div class="pool warn" data-drop="none"><h3>Not in a pool yet (${loose.length})</h3><ol>${loose.map(id => pl(id, null)).join("")}</ol></div>` : ""}
     <div class="pools">${s.pools.map(p => {
@@ -1206,7 +1206,8 @@ function dragStop(drop) {
     document.body.classList.remove("dragging");
     document.querySelectorAll(".pool.drop").forEach(z => z.classList.remove("drop"));
     const s = openSess();
-    if (drop && drag.zone !== null && s && s.status === "setup") { app.sel = null; act("pools", "session.move", { sid: s.id, pid: drag.pid, to: drag.zone }); }
+    const from = s && s.pools.find(p => p.players.includes(drag.pid)), here = from ? from.id : "none";
+    if (drop && drag.zone !== null && drag.zone !== here && s && s.status === "setup") { app.sel = null; act("pools", "session.move", { sid: s.id, pid: drag.pid, to: drag.zone }); }
     drag.suppress = true; setTimeout(() => { drag.suppress = false; }, 80);       // the click that follows a drop is not a tap
   }
   drag.pid = null; drag.active = false;
@@ -1215,7 +1216,10 @@ document.addEventListener("pointerdown", e => {
   const el = e.target.closest ? e.target.closest(".pl[data-drag]") : null;
   if (!el || e.button > 0 || drag.pid) return;
   drag.pid = el.dataset.pid; drag.x = e.clientX; drag.y = e.clientY; drag.touch = e.pointerType !== "mouse";
-  if (drag.touch) drag.timer = setTimeout(dragBegin, 350);
+  if (!drag.touch) return;
+  /* a finger on the handle drags at once: the handle is the one part of the row the tablet never treats as a scroll */
+  if (e.target.closest("[data-grip]")) { e.preventDefault(); dragBegin(); }
+  else drag.timer = setTimeout(dragBegin, 350);
 });
 document.addEventListener("pointermove", e => {
   if (!drag.pid) return;
