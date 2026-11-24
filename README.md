@@ -2,8 +2,8 @@
 
 Runs a doubles pickleball ladder league: roster, weekly pools set by rating, courtside score entry with large buttons, and standings.
 
-- **Pools:** players attending are ranked by rating and split into pools of about eight. The organiser can move anyone.
-- **Schedule:** a pool of eight plays 7 rounds, partnering everyone once and opposing everyone twice. Pools of 4 to 12 get an even schedule.
+- **Pools:** players attending are ranked by rating and split into pools of eight or nine where the numbers allow (tens and elevens rather than a seven; 23 players is an eleven and a twelve). Courts follow a pool's size (two from eight players, three for twelve) until the organiser sets them. The organiser can move anyone.
+- **Schedule:** a pool of eight plays 7 rounds, partnering everyone once and opposing everyone twice. A pool of nine plays 9 rounds the same way, one player sitting out each round. Pools of 4 to 12 get an even schedule.
 - **Scores:** tap the winning pair, tap the losing score, save. Any phone or tablet can enter a score while a session is live.
 - **Ratings:** win chance from the gap between team averages, up to 0.100 for the result, a small score bonus. Each session is averaged over every order of its rounds, so a game counts the same whenever it was played.
 
@@ -37,7 +37,7 @@ To switch the login back on: set `openOrganiser: false`, publish `database.rules
 python server.py
 ```
 
-Needs Python 3.10 or later and nothing else. It prints the address for other devices and creates `data/config.json` on first run. The organiser PIN in that file is not asked for unless you add `"open": false` to it.
+Needs Python 3.10 or later and nothing else. It prints the address for other devices and creates `data/config.json` on first run. The organiser PIN in that file is not asked for unless you add `"open": false` to it. Finishing a session works the ratings out away from the data lock, so other devices keep reading and scoring while it runs.
 
 ## Tests
 

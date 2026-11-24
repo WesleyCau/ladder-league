@@ -135,12 +135,16 @@
     return best.rounds;
   }
   /* How many pools for n players: the fewest with nobody over 9, so pools are 8s and 9s. If that would leave a pool
-     under 8 (28 to 31 players, say), one pool fewer: 10s and 11s on two courts beat 7s playing one game at a time. */
+     under 8 (28 to 31 players, say), one pool fewer: 10s and 11s on two courts (and for 23 players an 11 and a 12)
+     beat 7s playing one game at a time. Only 13, 14 and 15 players still get a pool under 8. */
   function poolCount(n) {
     let k = Math.max(1, Math.ceil(n / 9));
-    if (k > 1 && Math.floor(n / k) < 8 && Math.ceil(n / (k - 1)) <= 11) k--;
+    if (k > 1 && Math.floor(n / k) < 8 && Math.ceil(n / (k - 1)) <= MAX_POOL) k--;
     return k;
   }
+  /* Courts a pool of this size plays on: two games a round from eight players up, three for twelve. */
+  const courtsFor = count => (count >= 12 ? 3 : count >= 8 ? 2 : 1);
+  const autoCourts = s => s.pools.forEach(p => { if (!p.courtsHand) p.courts = courtsFor(p.players.length); });
   /* What a pool of n plays to, so it finishes at about the same time as a pool of eight playing to base. Playing time is
      taken as rounds x points. Only 11, 15 and 21 are offered; a tie goes to the shorter game. */
   const TARGETS = [11, 15, 21];
@@ -180,6 +184,15 @@
       if (ok) return (whistCache = rounds);
     }
     return null;
+  }
+  /* Nine players: the whist design on a 3 x 3 grid. One starter round with player 0 sitting out, moved on by each of the
+     nine steps of the grid. Everyone partners everyone once, opposes everyone twice and sits out once. */
+  let whist9Cache = null;
+  function whist9() {
+    if (whist9Cache) return whist9Cache;
+    const add = (x, k) => 3 * ((Math.floor(x / 3) + Math.floor(k / 3)) % 3) + (x + k) % 3;
+    const starter = [[[1, 2], [3, 6]], [[4, 8], [5, 7]]];
+    return (whist9Cache = Array.from({ length: 9 }, (_, k) => starter.map(([[a, b], [c, d]]) => [[add(a, k), add(b, k)], [add(c, k), add(d, k)]])));
   }
   function balanced(n, nRounds, rand) {
     const perRound = Math.floor(n / 4);
@@ -221,7 +234,7 @@
     const n = players.length;
     if (n < MIN_POOL || n > MAX_POOL) throw new Error(`a pool needs ${MIN_POOL} to ${MAX_POOL} players, got ${n}`);
     const rand = rng(String(seed) + "-" + n);
-    const design = (n === 8 && whist8()) || balanced(n, roundCount(n), rand);
+    const design = (n === 8 && whist8()) || (n === 9 && whist9()) || balanced(n, roundCount(n), rand);
     const slots = shuffle(players.slice(), rand), order = shuffle(design.slice(), rand);
     return order.map(rd => rd.map(([[a, b], [c, d]]) => [[slots[a], slots[b]], [slots[c], slots[d]]]));
   }
@@ -301,6 +314,7 @@
   function removeFromSession(s, pid) {
     s.attending = s.attending.filter(p => p !== pid);
     for (const pool of s.pools) if (pool.players.includes(pid)) { pool.players = pool.players.filter(p => p !== pid); clearSchedule(s); }
+    autoCourts(s);
   }
 
   function pointsOf(value) {
@@ -376,14 +390,11 @@
     let k = a.pools ? parseInt(a.pools, 10) : poolCount(n);
     k = Math.max(1, Math.min(k, Math.floor(n / MIN_POOL), 12));
     while (Math.ceil(n / k) > MAX_POOL) k++;
-    const courts = {};
-    s.pools.forEach(p => { courts[p.id] = p.courts; });
     const base = Math.floor(n / k), extra = n % k, pools = [];
     let at = 0;
     for (let i = 0; i < k; i++) {
       const count = base + (i < extra ? 1 : 0), id = String.fromCharCode(65 + i);
-      /* a pool of 8 or more plays two games a round, so it gets two courts unless the organiser gave it three */
-      pools.push({ id, name: "Pool " + id, courts: count < 8 ? 1 : Math.max(courts[id] || 0, 2), confirmed: 0, players: ranked.slice(at, at + count), rounds: [] });
+      pools.push({ id, name: "Pool " + id, courts: courtsFor(count), confirmed: 0, players: ranked.slice(at, at + count), rounds: [] });
       at += count;
     }
     s.pools = pools; s.games = {};
@@ -395,6 +406,7 @@
     if (a.to && a.to !== "none") target = s.pools.find(p => p.id === a.to) || fail("missing", "Pool not found.");
     s.pools.forEach(p => { p.players = p.players.filter(x => x !== a.pid); });
     if (target) { target.players.push(a.pid); target.players.sort(byRating(st)); }
+    autoCourts(s);      // courts follow a pool's size until the organiser sets them by hand
     clearSchedule(s);
   };
   H["session.pool"] = (st, a) => {
@@ -406,7 +418,7 @@
       if (pool.players.length || pool !== s2.pools[s2.pools.length - 1]) fail("invalid", "Only the last pool can be removed, and only when it is empty.");
       s2.pools.pop(); return;
     }
-    if ("courts" in a) { const c = parseInt(a.courts, 10); if (!(c >= 1 && c <= 3)) fail("invalid", "A pool can use 1 to 3 courts."); pool.courts = c; }
+    if ("courts" in a) { const c = parseInt(a.courts, 10); if (!(c >= 1 && c <= 3)) fail("invalid", "A pool can use 1 to 3 courts."); pool.courts = c; if (c === courtsFor(pool.players.length)) delete pool.courtsHand; else pool.courtsHand = true; }
     if ("target" in a) {
       /* what this pool plays to. "auto" hands it back to the session's setting; once a pool has scores it stays as it is */
       if (Object.values(s.games).some(g => g.pool === pool.id && g.status === "done")) fail("scores", `${pool.name} already has scores, so what it plays to cannot change.`);
@@ -445,9 +457,11 @@
     s.pointsToWin = base;
     s.status = "live";
   };
-  /* What a game in this pool is played to. In setup a pool without its own setting follows the session (or league) setting. */
+  /* What a game in this pool is played to. In setup a pool without its own setting follows the session (or league) setting.
+     A started or finished session that recorded nothing (an imported week) was played to 11, which is also what its
+     ratings assume: changing the league setting later must not change what an old game could have finished on. */
   function targetOf(st, s, pool) {
-    const base = s.pointsToWin || st.league.pointsToWin;
+    const base = s.pointsToWin || (s.status === "setup" ? st.league.pointsToWin : BASE_POINTS);
     if (pool && pool.target) return pool.target;
     return pool && s.status === "setup" ? suggestTarget(pool.players.length, base) : base;
   }
@@ -461,6 +475,7 @@
   /* Back to a fresh start for the same draw: no scores, every pool on round 1. */
   H["session.reset"] = (st, a) => {
     const s = getSession(st, a.sid, "live");
+    if (s.wasClosed) fail("reopened", "This session was finished once and then reopened, so it cannot be reset. Correct its scores, or delete it.");
     for (const g of Object.values(s.games)) { g.s1 = null; g.s2 = null; g.status = "pending"; delete g.at; delete g.auto; }
     s.pools.forEach(p => { p.confirmed = 0; });
     return { games: Object.keys(s.games).length };
@@ -555,6 +570,7 @@
     const closed = st.sessions.filter(x => x.status === "closed").sort((x, y) => (x.date + "|" + x.id < y.date + "|" + y.id ? -1 : 1));
     if (closed[closed.length - 1] !== s) fail("order", "Only the most recent session can be reopened.");
     s.status = "live";
+    s.wasClosed = true;                                                  // an imported session never passed through Finish here
     Object.values(s.games).forEach(g => { if (g.status === "skipped" && g.auto) { g.status = "pending"; delete g.auto; } });   // games marked not played by hand stay that way
     recompute(st);
   };
@@ -569,6 +585,6 @@
     return result;
   }
 
-  Object.assign(L, { rng, allOrders, compute, roundCount, poolCount, suggestTarget, targetOf, TARGETS, generate, summary, emptyState, normalize, apply, scoreGame, checkScore, roundReady, closeSession,
+  Object.assign(L, { rng, allOrders, compute, roundCount, poolCount, courtsFor, suggestTarget, targetOf, TARGETS, generate, summary, emptyState, normalize, apply, scoreGame, checkScore, roundReady, closeSession,
     ActionError, OPEN_ACTIONS, MIN_POOL, MAX_POOL });
 })(typeof module !== "undefined" && module.exports ? module.exports : (window.Ladder = {}));

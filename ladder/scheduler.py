@@ -1,7 +1,8 @@
 """Round-robin doubles schedules for one pool.
 
 8 players: the whist design. 7 rounds of 2 games; everyone partners everyone once and
-opposes everyone twice. Other sizes (4 to 12): a balanced schedule with even sit-outs,
+opposes everyone twice. 9 players: the whist design for nine, 9 rounds of 2 games with one
+player sitting out each round. Other sizes (4 to 12): a balanced schedule with even sit-outs,
 sized so each player gets as close to 7 games as an equal share allows.
 """
 import itertools
@@ -29,11 +30,17 @@ TARGETS = (11, 15, 21)
 
 
 def pool_count(n):
-    """How many pools for n players: the fewest with nobody over 9; if that leaves a pool under 8, one fewer (10s and 11s)."""
+    """How many pools for n players: the fewest with nobody over 9; if that leaves a pool under 8, one fewer
+    (10s and 11s, and for 23 an 11 and a 12). Mirrors poolCount in docs/core.js."""
     k = max(1, -(-n // 9))
-    if k > 1 and n // k < 8 and -(-n // (k - 1)) <= 11:
+    if k > 1 and n // k < 8 and -(-n // (k - 1)) <= MAX_POOL:
         k -= 1
     return k
+
+
+def courts_for(count):
+    """Courts a pool of this size plays on: two games a round from eight players up, three for twelve."""
+    return 3 if count >= 12 else 2 if count >= 8 else 1
 
 
 def suggest_target(n, base):
@@ -77,6 +84,14 @@ def _whist8():
         if all(partner[i][j] == 1 and oppose[i][j] == 2 for i in range(8) for j in range(8) if i != j):
             return rounds
     return None
+
+
+def _whist9():
+    """Whist design for 9 on a 3 x 3 grid: a starter round with player 0 sitting out, moved on by each step of the grid.
+    Everyone partners everyone once, opposes everyone twice and sits out once. Same design as whist9 in docs/core.js."""
+    add = lambda x, k: 3 * ((x // 3 + k // 3) % 3) + (x + k) % 3      # noqa: E731
+    starter = [((1, 2), (3, 6)), ((4, 8), (5, 7))]
+    return [[((add(a, k), add(b, k)), (add(c, k), add(d, k))) for (a, b), (c, d) in starter] for k in range(9)]
 
 
 def _balanced(n, n_rounds, rng):
@@ -127,7 +142,7 @@ def generate(players, seed=0):
     if not MIN_POOL <= n <= MAX_POOL:
         raise ValueError("a pool needs %d to %d players, got %d" % (MIN_POOL, MAX_POOL, n))
     rng = random.Random("%s-%d" % (seed, n))
-    design = _whist8() if n == 8 else None
+    design = _whist8() if n == 8 else _whist9() if n == 9 else None
     if design is None:
         design = _balanced(n, round_count(n), rng)
     slots = list(players)

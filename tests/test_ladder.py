@@ -4,11 +4,13 @@ import json
 import os
 import sys
 import tempfile
+import threading
+import time
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from ladder import importer, scheduler  # noqa: E402
+from ladder import engine, importer, scheduler  # noqa: E402
 from ladder.store import ActionError, Store  # noqa: E402
 
 
@@ -154,7 +156,7 @@ class StoreTest(unittest.TestCase):
         with self.assertRaises(ActionError):
             st.apply("session.close", dict(sid=sid), org=False)
         st.apply("session.close", dict(sid=sid), org=True)
-        after = st.state["ratings"]["current"]
+        after = dict(st.state["ratings"]["current"])      # a copy: the store now updates its state in place
         self.assertEqual(sess["status"], "closed")
         self.assertTrue(all(after[p] != before[p] for p in pool_a["players"]))
         self.assertEqual(after[sess["pools"][1]["players"][0]], before[sess["pools"][1]["players"][0]])  # no games, no change
@@ -323,13 +325,109 @@ class StoreTest(unittest.TestCase):
         self.assertTrue(all("target" not in p for p in sess["pools"]))
 
 
+    def test_old_session_cap_and_reopened_reset(self):
+        st = self.store
+        closed = st.state["sessions"][-1]
+        self.assertEqual(closed["pointsToWin"], 11)                 # the importer records what the weeks were played to
+        closed.pop("pointsToWin")                                   # a league file saved before it did
+        gid = next(g["id"] for g in closed["games"].values() if g["status"] == "done")
+        st.apply("league.update", dict(pointsToWin=15), org=True)
+        with self.assertRaises(ActionError) as cm:
+            st.apply("game.score", dict(sid=closed["id"], gid=gid, s1=15, s2=5, replace=True, history=True), org=True)
+        self.assertEqual(cm.exception.code, "invalid")
+        st.apply("game.score", dict(sid=closed["id"], gid=gid, s1=11, s2=3, replace=True, history=True), org=True)
+        st.apply("session.reopen", dict(sid=closed["id"]), org=True)
+        with self.assertRaises(ActionError) as cm:
+            st.apply("session.reset", dict(sid=closed["id"]), org=True)
+        self.assertEqual(cm.exception.code, "reopened")
+        self.assertEqual(closed["games"][gid]["status"], "done")
+
+    def test_courts_follow_pool_size(self):
+        st = self.store
+        sid = st.apply("session.create", dict(date="2026-11-23"), org=True)["id"]
+        sess = st.state["sessions"][-1]
+        st.apply("session.attendAll", dict(sid=sid, on=True), org=True)
+        st.apply("session.assign", dict(sid=sid), org=True)
+        self.assertEqual([p["courts"] for p in sess["pools"]], [scheduler.courts_for(len(p["players"])) for p in sess["pools"]])
+        a, b = sess["pools"][0], sess["pools"][1]
+        while len(a["players"]) > 7:
+            st.apply("session.move", dict(sid=sid, pid=a["players"][-1], to=b["id"]), org=True)
+        self.assertEqual(a["courts"], 1)
+        st.apply("session.pool", dict(sid=sid, pool=a["id"], courts=2), org=True)       # by hand: it stays
+        st.apply("session.move", dict(sid=sid, pid=a["players"][-1], to=b["id"]), org=True)
+        self.assertEqual((a["courts"], a.get("courtsHand")), (2, True))
+        st.apply("session.pool", dict(sid=sid, pool=a["id"], courts=1), org=True)       # what its size gives: automatic again
+        self.assertNotIn("courtsHand", a)
+
+    def test_finish_does_not_hold_up_other_devices(self):
+        """While the ratings are worked out a phone can still read the league and save a score, and that score counts."""
+        st = self.store
+        sid = st.apply("session.create", dict(date="2026-11-27"), org=True)["id"]
+        sess = st.state["sessions"][-1]
+        st.apply("session.assign", dict(sid=sid), org=True)
+        st.apply("session.start", dict(sid=sid), org=True)
+        gids = sess["pools"][0]["rounds"][0]
+        st.apply("game.score", dict(sid=sid, gid=gids[0], s1=11, s2=5), org=False)
+        real, started, out = engine.compute, threading.Event(), {}
+
+        def slow(state):
+            started.set()
+            time.sleep(1.0)
+            return real(state)
+
+        def finish():
+            try:
+                out["result"] = st.apply("session.close", dict(sid=sid), org=True)
+            except Exception as e:      # reported by the assertions below
+                out["error"] = e
+
+        engine.compute = slow
+        try:
+            t = threading.Thread(target=finish)
+            t.start()
+            self.assertTrue(started.wait(10))
+            t0 = time.time()
+            with st.lock:                                    # a phone asking for the league
+                self.assertEqual(sess["status"], "live")     # not finished until the ratings are ready
+            st.apply("game.score", dict(sid=sid, gid=gids[1], s1=11, s2=9), org=False)      # a score a moment after Finish was tapped
+            self.assertLess(time.time() - t0, 0.7)
+            t.join(30)
+        finally:
+            engine.compute = real
+        self.assertNotIn("error", out)
+        self.assertEqual(sess["status"], "closed")
+        self.assertEqual(sess["games"][gids[1]]["status"], "done")
+        self.assertIn(gids[1], st.state["ratings"]["games"])
+        self.assertIn(sid, st.state["ratings"]["sessions"])
+        self.assertEqual(len(os.listdir(os.path.join(self.tmp.name, "backups"))), 1)      # one copy of the finished night
+
+
 class PoolRuleTest(unittest.TestCase):
     def test_pool_count_and_targets(self):
         def sizes(n):
             k = scheduler.pool_count(n)
             return [n // k + (1 if i < n % k else 0) for i in range(k)]
         self.assertEqual([sizes(n) for n in (25, 27, 33, 36, 28, 31, 39, 23, 20, 8)],
-                         [[9, 8, 8], [9, 9, 9], [9, 8, 8, 8], [9, 9, 9, 9], [10, 9, 9], [11, 10, 10], [10, 10, 10, 9], [8, 8, 7], [10, 10], [8]])
+                         [[9, 8, 8], [9, 9, 9], [9, 8, 8, 8], [9, 9, 9, 9], [10, 9, 9], [11, 10, 10], [10, 10, 10, 9], [12, 11], [10, 10], [8]])
+        self.assertEqual([sizes(n) for n in (11, 12, 13, 15, 16, 22)], [[11], [12], [7, 6], [8, 7], [8, 8], [11, 11]])
+        self.assertEqual([scheduler.courts_for(n) for n in (4, 7, 8, 11, 12)], [1, 1, 2, 2, 3])
+
+    def test_nine_is_whist(self):
+        players = ["p%d" % i for i in range(9)]
+        rounds = scheduler.generate(players, seed="x")
+        s = scheduler.summary(players, rounds)
+        self.assertEqual((s["rounds"], s["games"]), (9, 18))
+        self.assertEqual((s["partner_min"], s["partner_max"]), (1, 1))
+        self.assertEqual((s["oppose_min"], s["oppose_max"]), (2, 2))
+        self.assertEqual((s["each_min"], s["each_max"]), (8, 8))
+        sat = [[p for p in players if p not in [x for g in rd for pair in g for x in pair]] for rd in rounds]
+        self.assertEqual(sorted(x[0] for x in sat), players)
+
+    def test_per_game_figures_round_as_the_site_does(self):
+        self.assertEqual(engine.fixed(28.125, 2), 28.13)        # an exact half goes away from zero, as toFixed does
+        self.assertEqual(engine.fixed(-17.125, 2), -17.13)
+        self.assertEqual(engine.fixed(0.12345, 4), 0.1235)      # 0.12345 is stored a shade above the half
+        self.assertEqual(str(engine.fixed(-0.001, 2)), "0.0")
         t = scheduler.suggest_target
         self.assertEqual([t(n, 11) for n in (8, 9, 10, 11, 12, 7)], [11] * 6)
         self.assertEqual([t(n, 15) for n in (8, 9, 10, 11, 12, 7)], [15, 11, 11, 11, 15, 11])

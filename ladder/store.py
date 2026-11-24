@@ -40,11 +40,18 @@ def _restore(cur, old):
         cur[:] = old
 
 
+class _Slow(Exception):
+    """Raised inside an action when the ratings have to be worked out again: apply() then does it away from the lock."""
+
+
 class Store:
     def __init__(self, data_dir):
         self.dir = data_dir
         self.path = os.path.join(data_dir, "league.json")
-        self.lock = threading.RLock()
+        self.lock = threading.RLock()      # guards self.state; held only for moments
+        self.slow = threading.Lock()       # one ratings recompute at a time
+        self._defer = False                # True while apply() is trying an action under the lock
+        self._backup_after = False         # the action wants a backup of the league as it is once saved
         os.makedirs(os.path.join(data_dir, "backups"), exist_ok=True)
         if os.path.exists(self.path):
             with open(self.path, encoding="utf-8") as f:
@@ -65,6 +72,8 @@ class Store:
             shutil.copy2(self.path, os.path.join(self.dir, "backups", "league-%s.json" % time.strftime("%Y%m%d-%H%M%S")))
 
     def recompute(self):
+        if self._defer:
+            raise _Slow()
         self.state["ratings"] = engine.compute(self.state)
 
     # ---- helpers -----------------------------------------------------------
@@ -109,21 +118,61 @@ class Store:
 
     # ---- dispatch ----------------------------------------------------------
     def apply(self, kind, args, org=False):
-        handler = getattr(self, "do_" + kind.replace(".", "_"), None)
-        if handler is None:
+        name = "do_" + kind.replace(".", "_")
+        if getattr(self, name, None) is None:
             raise ActionError("unknown", "Unknown action %s." % kind)
         with self.lock:
             if kind not in OPEN_ACTIONS and not org:
                 raise ActionError("pin", "Organiser PIN needed.")
             before = copy.deepcopy(self.state)      # a rejected action must leave nothing behind
+            self._defer, self._backup_after = True, False
             try:
-                result = handler(args or {}, org)
+                result = getattr(self, name)(args or {}, org)
+            except _Slow:
+                _restore(self.state, before)
             except Exception:
                 _restore(self.state, before)
                 raise
-            self.state["version"] += 1
-            self.save()
-            return result or {}
+            else:
+                return self._commit(result)
+            finally:
+                self._defer = False
+        return self._apply_slow(name, args or {}, org)
+
+    def _commit(self, result):
+        self.state["version"] += 1
+        self.save()
+        if self._backup_after:
+            self.backup()
+        return result or {}
+
+    def _apply_slow(self, name, args, org):
+        """An action that changes the ratings (finishing a session, correcting an old score). Working them out takes
+        seconds, because a pool of nine has 362,880 orders, so it is done on a copy with the lock released: phones keep
+        reading and scoring meanwhile. If anything else landed in that time the action is done again on top of it, so a
+        score entered a moment after Finish was tapped is counted rather than turned away."""
+        with self.slow:
+            for _ in range(4):
+                with self.lock:
+                    version = self.state["version"]
+                    twin = copy.copy(self)
+                    twin.state = copy.deepcopy(self.state)
+                twin._defer, twin._backup_after = False, False
+                result = getattr(twin, name)(args, org)      # an ActionError goes straight to the caller: nothing was changed
+                with self.lock:
+                    if self.state["version"] == version:
+                        _restore(self.state, twin.state)
+                        self._backup_after = twin._backup_after
+                        return self._commit(result)
+            with self.lock:      # the league would not hold still: do it the plain way
+                before = copy.deepcopy(self.state)
+                self._backup_after = False
+                try:
+                    result = getattr(self, name)(args, org)
+                except Exception:
+                    _restore(self.state, before)
+                    raise
+                return self._commit(result)
 
     # ---- league and players ------------------------------------------------
     def do_league_update(self, a, org):
@@ -149,8 +198,9 @@ class Store:
         return pts
 
     def _target(self, sess, pool=None):
-        """What a game in this pool is played to. In setup a pool without its own setting follows the session setting."""
-        base = sess.get("pointsToWin") or self.state["league"]["pointsToWin"]
+        """What a game in this pool is played to. In setup a pool without its own setting follows the session setting.
+        A started or finished session with nothing recorded (an imported week) was to 11, as its ratings assume."""
+        base = sess.get("pointsToWin") or (self.state["league"]["pointsToWin"] if sess["status"] == "setup" else engine.BASE_POINTS)
         if pool is not None and pool.get("target"):
             return pool["target"]
         if pool is not None and sess["status"] == "setup":
@@ -227,6 +277,14 @@ class Store:
             if pid in pool["players"]:
                 pool["players"].remove(pid)
                 self._clear_schedule(sess)
+        self._auto_courts(sess)
+
+    @staticmethod
+    def _auto_courts(sess):
+        """Courts follow a pool's size until the organiser sets them by hand."""
+        for pool in sess["pools"]:
+            if not pool.get("courtsHand"):
+                pool["courts"] = scheduler.courts_for(len(pool["players"]))
 
     def do_session_attend(self, a, org):
         sess = self._session(a.get("sid"), "setup")
@@ -272,14 +330,12 @@ class Store:
         k = max(1, min(k, n // scheduler.MIN_POOL, 12))
         while -(-n // k) > scheduler.MAX_POOL:
             k += 1
-        courts = {p["id"]: p["courts"] for p in sess["pools"]}
         base, extra = divmod(n, k)
         pools, at = [], 0
         for i in range(k):
             count = base + (1 if i < extra else 0)
             pid = chr(65 + i)
-            # a pool of 8 or more plays two games a round, so it gets two courts unless the organiser gave it three
-            pools.append(dict(id=pid, name="Pool " + pid, courts=1 if count < 8 else max(courts.get(pid, 0), 2), confirmed=0,
+            pools.append(dict(id=pid, name="Pool " + pid, courts=scheduler.courts_for(count), confirmed=0,
                               players=ranked[at:at + count], rounds=[]))
             at += count
         sess["pools"] = pools
@@ -301,6 +357,7 @@ class Store:
         if target is not None:
             target["players"].append(pid)
             self._sort_pool(target)
+        self._auto_courts(sess)
         self._clear_schedule(sess)
 
     def do_session_pool(self, a, org):
@@ -324,6 +381,10 @@ class Store:
             if not 1 <= courts <= 3:
                 raise ActionError("invalid", "A pool can use 1 to 3 courts.")
             pool["courts"] = courts
+            if courts == scheduler.courts_for(len(pool["players"])):
+                pool.pop("courtsHand", None)
+            else:
+                pool["courtsHand"] = True
         if "target" in a:
             if any(g["pool"] == pool["id"] and g["status"] == "done" for g in sess["games"].values()):
                 raise ActionError("scores", "%s already has scores, so what it plays to cannot change." % pool["name"])
@@ -389,6 +450,8 @@ class Store:
     def do_session_reset(self, a, org):
         """Back to a fresh start for the same draw: no scores, every pool on round 1."""
         sess = self._session(a.get("sid"), "live")
+        if sess.get("wasClosed"):
+            raise ActionError("reopened", "This session was finished once and then reopened, so it cannot be reset. Correct its scores, or delete it.")
         self.backup()
         for g in sess["games"].values():
             g.update(s1=None, s2=None, status="pending")
@@ -522,8 +585,7 @@ class Store:
         sess["status"] = "closed"
         sess["wasClosed"] = True
         self.recompute()
-        self.save()
-        self.backup()
+        self._backup_after = True      # a copy of the league with the night finished
 
     def do_session_reopen(self, a, org):
         sess = self._session(a.get("sid"), "closed")
@@ -534,6 +596,7 @@ class Store:
             raise ActionError("order", "Only the most recent session can be reopened.")
         self.backup()
         sess["status"] = "live"
+        sess["wasClosed"] = True      # an imported session never passed through Finish here
         for g in sess["games"].values():
             if g["status"] == "skipped" and g.get("auto"):
                 g["status"] = "pending"
