@@ -557,3 +557,33 @@ a.s-champ:active { filter: brightness(.95); }
   .s-in { padding-bottom: 46vw; }
   .s-ball { right: -22vw; top: auto; bottom: -30vw; width: 92vw; transform: none; }
 }
+/* the front page built on the club's photos: the league logo and the words on the night sky, the courts under lights below */
+.s-words { display: flex; flex-direction: column; gap: clamp(12px, 1.8vw, 22px); min-width: 0; }
+.s-hero.has-photo { display: block; min-height: 0; padding: 0 !important; background: #000; }
+.s-hero.has-photo .s-in { position: relative; z-index: 1; max-width: 1280px; padding: clamp(22px, 4vw, 56px) clamp(16px, 4vw, 44px) 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: clamp(18px, 3.4vw, 48px); align-items: center; }
+.s-logo { display: block; width: clamp(150px, 23vw, 310px); height: auto; border-radius: clamp(18px, 2.4vw, 30px); box-shadow: 0 24px 80px rgba(255, 106, 19, .34); }
+.s-hero.has-photo h1 { font-size: clamp(54px, 8.2vw, 128px); }
+.s-hero.has-photo h1 span { display: inline-block; margin-right: .22em; }
+/* the photo's own black sky runs up into the page: the words sit on it */
+.s-photo { position: relative; display: block; margin-top: calc(-1 * min(19vw, 21vh)); }
+.s-photo img { display: block; width: 100%; height: min(75.3vw, 82vh); object-fit: cover; object-position: 50% 48%; }
+.s-photo::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 42%; background: linear-gradient(180deg, #000 0%, rgba(0, 0, 0, .78) 38%, rgba(0, 0, 0, 0)); pointer-events: none; }
+.s-photo::after { content: ""; position: absolute; inset: auto 0 0 0; height: 16%; background: linear-gradient(180deg, rgba(8, 8, 10, 0), #08080a); pointer-events: none; }
+@media (max-width: 699px) {
+  .s-hero.has-photo { background: #000; }
+  .s-hero.has-photo .s-in { grid-template-columns: minmax(0, 1fr); padding-bottom: 0; }
+  .s-logo { width: 132px; }
+}
+.s-map { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); gap: 18px 30px; align-items: start; }
+.s-mapimg { display: block; background: #fff; border-radius: 20px; overflow: hidden; border: 1px solid var(--s-line); }
+.s-mapimg img { display: block; width: 100%; height: auto; }
+.s-key { display: flex; flex-direction: column; gap: 14px; align-items: flex-start; }
+.s-key div { display: flex; gap: 12px; align-items: flex-start; }
+.s-key i { flex: none; width: 30px; height: 12px; margin-top: 7px; border-radius: 3px; }
+.s-key .k-blue { background: #5b6dff; }
+.s-key .k-orange { background: #ff8f1f; }
+.s-key .k-yellow { height: 20px; width: 14px; margin: 3px 8px 0; background: none; border: 3px solid #ffd84a; border-radius: 2px; }
+.s-key p { display: flex; flex-direction: column; gap: 2px; }
+.s-key b { font-size: 18px; }
+.s-key span { color: var(--s-ink2); font-size: 15px; line-height: 1.4; }
+@media (max-width: 799px) { .s-map { grid-template-columns: minmax(0, 1fr); } }

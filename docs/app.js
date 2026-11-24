@@ -200,14 +200,18 @@ function viewPickleball() {
   const winners = last ? last.pools.map(p => ({ p, r: poolTable(last, p)[0] })).filter(x => x.r && x.r.w + x.r.l > 0) : [];
   return `
   <div class="sell">
-    <section class="s-hero">
-      <div class="s-ball" aria-hidden="true">${ballSvg(0.85)}</div>
+    <section class="s-hero${club.photo ? " has-photo" : ""}">
+      ${club.photo ? "" : `<div class="s-ball" aria-hidden="true">${ballSvg(0.85)}</div>`}
       <div class="s-in">
-        <span class="s-kick">${esc(club.kicker || st.league.name)}</span>
-        <h1>${head}</h1>
-        <p class="s-lede">${esc(club.pitch || "Two a side, a court you can cover in three steps, and rallies that will not end.")}${ranked.length ? ` <b>${ranked.length} players. ${played.length} games so far. One ladder.</b>` : ""}</p>
-        <div class="row s-go"><a class="btn primary" href="#/">Tonight's draw</a><a class="btn ghost" href="#/standings">The ladder</a></div>
+        ${club.logo ? `<img class="s-logo" src="${esc(club.logo.src)}" alt="${esc(club.logo.alt || "")}" width="500" height="500">` : ""}
+        <div class="s-words">
+          <span class="s-kick">${esc(club.kicker || st.league.name)}</span>
+          <h1>${head}</h1>
+          <p class="s-lede">${esc(club.pitch || "Two a side, a court you can cover in three steps, and rallies that will not end.")}${ranked.length ? ` <b>${ranked.length} players. ${played.length} games so far. One ladder.</b>` : ""}</p>
+          <div class="row s-go"><a class="btn primary" href="#/">Tonight's draw</a><a class="btn ghost" href="#/standings">The ladder</a></div>
+        </div>
       </div>
+      ${club.photo ? `<a class="s-photo" href="${esc(club.photo.src)}" target="_blank" rel="noopener" title="Open the photo"><img src="${esc(club.photo.src)}" alt="${esc(club.photo.alt || "")}" width="${club.photo.w || 2000}" height="${club.photo.h || 1506}"></a>` : ""}
     </section>
 
     ${club.champion ? `<a class="s-champ alt" ${club.champion.id && st.players[club.champion.id] ? `href="#/player/${club.champion.id}"` : ""}>
@@ -234,6 +238,15 @@ function viewPickleball() {
       </div>
     </section>` : ""}
 
+    ${club.map ? `<section class="s-block">
+      <h2>${esc(club.map.title || "Find us")}${club.map.place ? ` <small>${esc(club.map.place)}</small>` : ""}</h2>
+      <div class="s-map">
+        <a class="s-mapimg" href="${esc(club.map.src)}" target="_blank" rel="noopener" title="Open the map"><img src="${esc(club.map.src)}" alt="${esc(club.map.alt || "")}" width="${club.map.w || 2000}" height="${club.map.h || 1414}" loading="lazy"></a>
+        <div class="s-key">${(club.map.key || []).map(k => `<div><i class="k-${esc(k[0])}"></i><p><b>${esc(k[1])}</b>${k[2] ? `<span>${esc(k[2])}</span>` : ""}</p></div>`).join("")}
+          ${club.map.link ? `<a class="btn ghost" href="${esc(club.map.link)}" target="_blank" rel="noopener">Open in Google Maps</a>` : ""}</div>
+      </div>
+    </section>` : ""}
+
     ${(club.story || []).length ? `<section class="s-block">
       <h2>${esc(club.title || "How we got here")}</h2>
       <div class="s-story">${club.story.map(x => `<div><b class="num">${esc(x[0])}</b><p>${esc(x[1])}</p></div>`).join("")}</div>
@@ -250,7 +263,7 @@ function shell(body) {
   const link = (href, key, ico, label) => `<a href="${href}" ${route === key || (key === "standings" && route === "player") ? 'aria-current="page"' : ""}><span class="ico" aria-hidden="true">${ico}</span>${label}</a>`;
   return `
   <header class="top"><div class="top-in">
-    <div class="top-l"><a class="brand" href="#/pickleball" title="What is pickleball?">${esc(app.st.league.name)}</a>${s && s.status === "live" ? '<span class="live-dot">Live</span>' : ""}</div>
+    <div class="top-l"><a class="brand" href="#/pickleball" title="About the league">${esc(app.st.league.name)}</a>${s && s.status === "live" ? '<span class="live-dot">Live</span>' : ""}</div>
     <div class="top-c">${route === "board" && fsCan() ? `<button class="fsbtn" data-act="fullscreen">${fsOn() ? "Exit full screen" : "Full screen"}</button>` : ""}</div>
     <nav class="nav" aria-label="Main">
       ${link("#/", "", "●", "Tonight")}${link("#/board", "board", "▦", "All courts")}${link("#/standings", "standings", "≡", "Standings")}${link("#/org", "org", "⚙", "Organiser")}

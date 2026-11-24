@@ -7,6 +7,12 @@ window.LADDER_CONFIG = {
   openOrganiser: true,
   /* The page behind the league name in the top bar. Optional: leave club out and that page shows the court on its own. */
   club: {
+    /* pictures on the front page (files in docs/img): the courts photo, the league logo, the map of how to get in */
+    photo: { src: "img/courts.webp", alt: "Doubles games under lights on the outdoor pickleball courts at night", w: 2000, h: 1506 },
+    logo: { src: "img/league.png", alt: "Adelaide Pickleball Ladder League" },
+    map: { src: "img/find-us.webp", alt: "Aerial map of the Mile End Sports Complex: vehicle entries marked with blue arrows, the players' way in to the courts with an orange arrow, the pickleball courts in a yellow box", w: 2000, h: 1414,
+      title: "Find us", place: "Mile End Sports Complex · outdoor pickleball courts",
+      key: [["blue", "Vehicle entry", "The blue arrows on the map."], ["orange", "Courts player entry", "Walk in at the orange arrow."], ["yellow", "Pickleball courts", "The yellow box."]] },
     kicker: "Adelaide Pickleball Club · est. 2021",
     headline: ["Fast hands.", "Long rallies.", "Monday nights."],
     pitch: "Pickleball at Mile End. Two a side, a court you can cover in three steps, and rallies that will not end.",
