@@ -186,6 +186,13 @@ class Store:
             if a["nameStyle"] not in ("short", "full"):
                 raise ActionError("invalid", "Choose short or full names.")
             lg["nameStyle"] = a["nameStyle"]
+        if "schedule" in a:
+            if a["schedule"] not in ("ranker", "closest", "mixed"):
+                raise ActionError("invalid", "Choose a schedule.")
+            sess = self._open_session()
+            if a["schedule"] != lg.get("schedule", "mixed") and sess and sess["status"] == "setup":
+                self._clear_schedule(sess)      # drawn again under the new choice
+            lg["schedule"] = a["schedule"]
         if "pointsToWin" in a:
             lg["pointsToWin"] = self._points(a["pointsToWin"])
 
@@ -360,6 +367,21 @@ class Store:
         self._auto_courts(sess)
         self._clear_schedule(sess)
 
+    def do_session_swap(self, a, org):
+        """Two players in the same pool change places in its order (the schedule slot under the fixed rounds)."""
+        sess = self._session(a.get("sid"), "setup")
+        pool = next((p for p in sess["pools"] if a.get("a") in p["players"]), None)
+        if pool is None:
+            raise ActionError("missing", "That player is not in a pool.")
+        if a.get("b") not in pool["players"]:
+            raise ActionError("invalid", "Both players must be in the same pool.")
+        i, j = pool["players"].index(a["a"]), pool["players"].index(a["b"])
+        if i == j:
+            raise ActionError("invalid", "Choose two different players.")
+        pool["players"][i], pool["players"][j] = a["b"], a["a"]
+        self._clear_schedule(sess)
+        return dict(pool=pool["id"], slots=[i + 1, j + 1])
+
     def do_session_pool(self, a, org):
         sess = self._session(a.get("sid"), "setup", "live")
         if a.get("add"):
@@ -418,7 +440,7 @@ class Store:
         for pool in sess["pools"]:
             pool["rounds"] = []
             pool["confirmed"] = 0
-            for ri, rd in enumerate(scheduler.generate(pool["players"], seed=sess["id"] + pool["id"])):
+            for ri, rd in enumerate(scheduler.generate(pool["players"], seed=sess["id"] + pool["id"], mode=self.state["league"].get("schedule", "mixed"))):
                 ids = []
                 for t1, t2 in rd:
                     gid = self._id("g")

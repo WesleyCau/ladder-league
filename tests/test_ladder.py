@@ -70,6 +70,26 @@ class SchedulerTest(unittest.TestCase):
             self.assertLessEqual(abs(s["each_min"] - 7), 1, "n=%d" % n)
             self.assertLessEqual(s["partner_max"] - s["partner_min"], 2, "n=%d" % n)
 
+    def test_ranker_rounds(self):
+        show = lambda rounds: "|".join(" ".join("%s%sv%s%s" % (a + b) for a, b in rd) for rd in rounds)
+        eight, nine = [str(i) for i in range(1, 9)], [str(i) for i in range(1, 10)]
+        r8, r9 = scheduler.generate(eight, seed="any", mode="ranker"), scheduler.generate(nine, seed="other", mode="ranker")
+        self.assertEqual(show(r8), scheduler.RANKER[8])
+        self.assertEqual(show(r9), scheduler.RANKER[9])
+        self.assertEqual(scheduler.generate(eight, seed="another night", mode="ranker"), r8)
+        self.assertEqual(scheduler.generate(eight, mode="closest"), [r8[k - 1] for k in (1, 3, 5, 4, 6, 7, 2)])
+        self.assertEqual(scheduler.generate(nine, mode="closest"), [r9[k - 1] for k in (9, 3, 1, 2, 4, 7, 6, 8, 5)])
+        self.assertIn("const CLOSEST = { 8: [1, 3, 5, 4, 6, 7, 2], 9: [9, 3, 1, 2, 4, 7, 6, 8, 5] };",
+                      open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "core.js"), encoding="utf-8").read())
+        for players, rounds, n in ((eight, r8, 7), (nine, r9, 9)):
+            s = scheduler.summary(players, rounds)
+            self.assertEqual((s["rounds"], s["partner_min"], s["partner_max"], s["oppose_min"], s["oppose_max"]), (n, 1, 1, 2, 2))
+        self.assertEqual([next(p for p in nine if p not in [x for g in rd for pair in g for x in pair]) for rd in r9], nine)
+        # the website holds the same text
+        import re
+        core = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "core.js"), encoding="utf-8").read()
+        self.assertEqual(re.findall(r'^    ([89]): "([0-9v |]+)",$', core, re.M), [("8", scheduler.RANKER[8]), ("9", scheduler.RANKER[9])])
+
     def test_same_seed_same_schedule(self):
         players = ["p%d" % i for i in range(9)]
         self.assertEqual(scheduler.generate(players, seed="s1A"), scheduler.generate(players, seed="s1A"))
